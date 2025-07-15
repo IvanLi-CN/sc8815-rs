@@ -1,7 +1,7 @@
 [package]
 name = "sc8815_stm32g474re_example"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
 embassy-stm32 = { git = "https://github.com/embassy-rs/embassy.git", rev = "94f9b2707486ca3eade5bf4b237edf3d6aa90f35", features = [
