@@ -1,8 +1,8 @@
 [package]
 name = "sc8815"
-version = "0.1.0"
+version = "0.0.0"
 authors = ["Ivan Li <ivanli2048@gmail.com>"]
-edition = "2021"
+edition = "2024"
 license = "MIT OR Apache-2.0"
 description = "SC8815 power management IC driver for embedded systems with dual-mode operation, ADC support, and comprehensive configuration"
 keywords = ["embedded-hal-driver", "no-std", "sc8815", "power-management", "battery-charging"]
