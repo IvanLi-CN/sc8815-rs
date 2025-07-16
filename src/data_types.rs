@@ -155,7 +155,7 @@ pub enum ThermalStatus {
 }
 
 /// Represents the SC8815 device status based on the actual status register.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct SC8815Status {
     /// End of charge (EOC) conditions are satisfied.
@@ -170,20 +170,8 @@ pub struct SC8815Status {
     pub ac_adapter_connected: bool,
 }
 
-impl Default for SC8815Status {
-    fn default() -> Self {
-        Self {
-            eoc: false,
-            otp_fault: false,
-            vbus_short_fault: false,
-            usb_load_detected: false,
-            ac_adapter_connected: false,
-        }
-    }
-}
-
 /// Represents ADC measurement values from the SC8815.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct AdcMeasurements {
     /// VBUS voltage in millivolts.
@@ -196,18 +184,6 @@ pub struct AdcMeasurements {
     pub ibat_ma: u16,
     /// ADIN voltage in millivolts.
     pub adin_mv: u16,
-}
-
-impl Default for AdcMeasurements {
-    fn default() -> Self {
-        Self {
-            vbus_mv: 0,
-            vbat_mv: 0,
-            ibus_ma: 0,
-            ibat_ma: 0,
-            adin_mv: 0,
-        }
-    }
 }
 
 /// Represents the overall status of the SC8815 device.
@@ -555,7 +531,7 @@ pub struct DeviceInfo {
 }
 
 /// Interrupt configuration for the SC8815.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct InterruptConfig {
     /// Enable power good change interrupts.
@@ -572,18 +548,4 @@ pub struct InterruptConfig {
     pub overcurrent_protection: bool,
     /// Enable overvoltage protection interrupts.
     pub overvoltage_protection: bool,
-}
-
-impl Default for InterruptConfig {
-    fn default() -> Self {
-        Self {
-            power_good_change: false,
-            charging_state_change: false,
-            battery_status_change: false,
-            input_source_change: false,
-            thermal_status_change: false,
-            overcurrent_protection: false,
-            overvoltage_protection: false,
-        }
-    }
 }

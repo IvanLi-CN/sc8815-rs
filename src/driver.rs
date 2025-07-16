@@ -18,6 +18,9 @@ use embedded_hal::i2c::I2c;
 #[cfg(feature = "async")]
 use embedded_hal_async::i2c::I2c;
 
+/// Type alias for ADC measurement results (VBUS, VBAT, IBUS, IBAT, ADIN in mV/mA)
+type AdcResults<E> = Result<(u16, u16, u16, u16, u16), Error<E>>;
+
 /// SC8815 power management IC driver.
 ///
 /// This driver provides a high-level interface to the SC8815 power management IC,
@@ -110,10 +113,10 @@ where
     /// Returns `Ok(())` on success, or an `Error` if initialization fails.
     pub async fn init(&mut self) -> Result<(), Error<I2C::Error>> {
         // Read status register to verify communication
-        let status = self.read_register(Register::Status).await?;
+        let _status = self.read_register(Register::Status).await?;
 
         #[cfg(feature = "defmt")]
-        defmt::info!("SC8815 status: 0x{:02X}", status);
+        defmt::info!("SC8815 status: 0x{:02X}", _status);
 
         // Set factory bit as required by datasheet
         let mut ctrl2 = self.read_register(Register::Ctrl2Set).await?;
@@ -196,7 +199,7 @@ where
     ///
     /// Returns `Ok(())` on success, or an `Error` if the operation fails.
     pub async fn set_otg_mode(&mut self, enable_otg: bool) -> Result<(), Error<I2C::Error>> {
-        let mut ctrl0 = self.read_register(Register::Ctrl0Set).await?;
+        let ctrl0 = self.read_register(Register::Ctrl0Set).await?;
         let mut flags = Ctrl0Flags::from_bits_truncate(ctrl0);
 
         if enable_otg {
@@ -229,7 +232,7 @@ where
     ///
     /// Returns `Ok(())` on success, or an `Error` if the operation fails.
     pub async fn set_trickle_charging(&mut self, enable: bool) -> Result<(), Error<I2C::Error>> {
-        let mut ctrl1 = self.read_register(Register::Ctrl1Set).await?;
+        let ctrl1 = self.read_register(Register::Ctrl1Set).await?;
         let mut flags = Ctrl1Flags::from_bits_truncate(ctrl1);
 
         if enable {
@@ -254,7 +257,7 @@ where
         &mut self,
         enable: bool,
     ) -> Result<(), Error<I2C::Error>> {
-        let mut ctrl1 = self.read_register(Register::Ctrl1Set).await?;
+        let ctrl1 = self.read_register(Register::Ctrl1Set).await?;
         let mut flags = Ctrl1Flags::from_bits_truncate(ctrl1);
 
         if enable {
@@ -319,7 +322,7 @@ where
     ///
     /// Returns `Ok(())` on success, or an `Error` if the operation fails.
     pub async fn set_frequency_dithering(&mut self, enable: bool) -> Result<(), Error<I2C::Error>> {
-        let mut ctrl2 = self.read_register(Register::Ctrl2Set).await?;
+        let ctrl2 = self.read_register(Register::Ctrl2Set).await?;
         let mut flags = Ctrl2Flags::from_bits_truncate(ctrl2);
 
         if enable {
@@ -341,7 +344,7 @@ where
     ///
     /// Returns `Ok(())` on success, or an `Error` if the operation fails.
     pub async fn set_pfm_mode(&mut self, enable: bool) -> Result<(), Error<I2C::Error>> {
-        let mut ctrl3 = self.read_register(Register::Ctrl3Set).await?;
+        let ctrl3 = self.read_register(Register::Ctrl3Set).await?;
         let mut flags = Ctrl3Flags::from_bits_truncate(ctrl3);
 
         if enable {
@@ -369,7 +372,7 @@ where
         &mut self,
         disable: bool,
     ) -> Result<(), Error<I2C::Error>> {
-        let mut ctrl3 = self.read_register(Register::Ctrl3Set).await?;
+        let ctrl3 = self.read_register(Register::Ctrl3Set).await?;
         let mut flags = Ctrl3Flags::from_bits_truncate(ctrl3);
 
         if disable {
@@ -451,7 +454,7 @@ where
     ///
     /// Returns `Ok(())` on success, or an `Error` if the operation fails.
     pub async fn set_pgate_control(&mut self, enable: bool) -> Result<(), Error<I2C::Error>> {
-        let mut ctrl3 = self.read_register(Register::Ctrl3Set).await?;
+        let ctrl3 = self.read_register(Register::Ctrl3Set).await?;
         let mut flags = Ctrl3Flags::from_bits_truncate(ctrl3);
 
         if enable {
@@ -473,7 +476,7 @@ where
     ///
     /// Returns `Ok(())` on success, or an `Error` if the operation fails.
     pub async fn set_gpo_control(&mut self, enable: bool) -> Result<(), Error<I2C::Error>> {
-        let mut ctrl3 = self.read_register(Register::Ctrl3Set).await?;
+        let ctrl3 = self.read_register(Register::Ctrl3Set).await?;
         let mut flags = Ctrl3Flags::from_bits_truncate(ctrl3);
 
         if enable {
@@ -495,7 +498,7 @@ where
     ///
     /// Returns `Ok(())` on success, or an `Error` if the operation fails.
     pub async fn set_adc_conversion(&mut self, start: bool) -> Result<(), Error<I2C::Error>> {
-        let mut ctrl3 = self.read_register(Register::Ctrl3Set).await?;
+        let ctrl3 = self.read_register(Register::Ctrl3Set).await?;
         let mut flags = Ctrl3Flags::from_bits_truncate(ctrl3);
 
         if start {
@@ -540,7 +543,7 @@ where
         let ibus_lim_set =
             ((limit_a * 256.0 * rs1_mohm as f32) / (ratio_multiplier as f32 * 10.0)) - 1.0;
 
-        if ibus_lim_set < 0.0 || ibus_lim_set > 255.0 {
+        if !(0.0..=255.0).contains(&ibus_lim_set) {
             return Err(Error::InvalidParameter);
         }
 
@@ -589,7 +592,7 @@ where
         let ibat_lim_set =
             ((limit_a * 256.0 * rs2_mohm as f32) / (ratio_multiplier as f32 * 10.0)) - 1.0;
 
-        if ibat_lim_set < 0.0 || ibat_lim_set > 255.0 {
+        if !(0.0..=255.0).contains(&ibat_lim_set) {
             return Err(Error::InvalidParameter);
         }
 
@@ -688,10 +691,7 @@ where
             _ => return Err(Error::InvalidParameter),
         };
 
-        let voltage_mv = ((4 * (vbus_fb_high as u16) + ((vbus_fb_low >> 6) & 0x03) as u16 + 1)
-            as f32
-            * ratio_multiplier
-            * 2.0) as u16;
+        let voltage_mv = ((4 * vbus_fb_value + 1) as f32 * ratio_multiplier * 2.0) as u16;
 
         Ok(voltage_mv)
     }
@@ -837,8 +837,7 @@ where
 
         // Calculate voltage based on formula:
         // VADIN = (4 * ADIN_VALUE + ADIN_VALUE2 + 1) * 2 mV
-        let voltage_mv =
-            ((4 * (adin_high as u16) + ((adin_low >> 6) & 0x03) as u16 + 1) * 2) as u16;
+        let voltage_mv = (4 * (adin_high as u16) + ((adin_low >> 6) & 0x03) as u16 + 1) * 2;
 
         Ok(voltage_mv)
     }
@@ -865,7 +864,7 @@ where
         ibat_ratio: u8,
         rs1_mohm: u16,
         rs2_mohm: u16,
-    ) -> Result<(u16, u16, u16, u16, u16), Error<I2C::Error>> {
+    ) -> AdcResults<I2C::Error> {
         let vbus_mv = self.read_vbus_voltage(vbus_ratio).await?;
         let vbat_mv = self.read_vbat_voltage(vbat_mon_ratio).await?;
         let ibus_ma = self.read_ibus_current(ibus_ratio, rs1_mohm).await?;
@@ -1062,7 +1061,7 @@ where
         };
 
         let vbusref_i_mv = voltage_mv as f32 / ratio_multiplier;
-        if vbusref_i_mv < 2.0 || vbusref_i_mv > 2048.0 {
+        if !(2.0..=2048.0).contains(&vbusref_i_mv) {
             return Err(Error::InvalidParameter);
         }
 
@@ -1091,7 +1090,7 @@ where
         self.write_register(Register::Ratio, ratio_reg).await?;
 
         // Ensure FB_SEL is set to 0 for internal reference
-        let mut ctrl1 = self.read_register(Register::Ctrl1Set).await?;
+        let ctrl1 = self.read_register(Register::Ctrl1Set).await?;
         let mut flags = Ctrl1Flags::from_bits_truncate(ctrl1);
         flags.remove(Ctrl1Flags::FB_SEL);
         self.write_register(Register::Ctrl1Set, flags.bits()).await
@@ -1110,7 +1109,7 @@ where
         &mut self,
         reference_mv: u16,
     ) -> Result<(), Error<I2C::Error>> {
-        if reference_mv < 700 || reference_mv > 2048 {
+        if !(700..=2048).contains(&reference_mv) {
             return Err(Error::InvalidParameter);
         }
 
@@ -1131,7 +1130,7 @@ where
             .await?;
 
         // Set FB_SEL to 1 for external reference
-        let mut ctrl1 = self.read_register(Register::Ctrl1Set).await?;
+        let ctrl1 = self.read_register(Register::Ctrl1Set).await?;
         let mut flags = Ctrl1Flags::from_bits_truncate(ctrl1);
         flags.insert(Ctrl1Flags::FB_SEL);
         self.write_register(Register::Ctrl1Set, flags.bits()).await
@@ -1176,11 +1175,7 @@ where
         use_internal: bool,
         ir_comp_mohm: u8,
     ) -> Result<(), Error<I2C::Error>> {
-        if cell_count == 0
-            || cell_count > 4
-            || voltage_per_cell_mv < 4100
-            || voltage_per_cell_mv > 4450
-        {
+        if cell_count == 0 || cell_count > 4 || !(4100..=4450).contains(&voltage_per_cell_mv) {
             return Err(Error::InvalidParameter);
         }
 
@@ -1235,7 +1230,7 @@ where
         &mut self,
         use_60_percent: bool,
     ) -> Result<(), Error<I2C::Error>> {
-        let mut ctrl1 = self.read_register(Register::Ctrl1Set).await?;
+        let ctrl1 = self.read_register(Register::Ctrl1Set).await?;
         let mut flags = Ctrl1Flags::from_bits_truncate(ctrl1);
 
         if use_60_percent {
@@ -1257,7 +1252,7 @@ where
     ///
     /// Returns `Ok(())` on success, or an `Error` if the operation fails.
     pub async fn set_eoc_threshold(&mut self, use_tenth: bool) -> Result<(), Error<I2C::Error>> {
-        let mut ctrl3 = self.read_register(Register::Ctrl3Set).await?;
+        let ctrl3 = self.read_register(Register::Ctrl3Set).await?;
         let mut flags = Ctrl3Flags::from_bits_truncate(ctrl3);
 
         if use_tenth {
@@ -1282,7 +1277,7 @@ where
         &mut self,
         use_ibat: bool,
     ) -> Result<(), Error<I2C::Error>> {
-        let mut ctrl1 = self.read_register(Register::Ctrl1Set).await?;
+        let ctrl1 = self.read_register(Register::Ctrl1Set).await?;
         let mut flags = Ctrl1Flags::from_bits_truncate(ctrl1);
 
         if use_ibat {
@@ -1307,7 +1302,7 @@ where
         &mut self,
         improve_response: bool,
     ) -> Result<(), Error<I2C::Error>> {
-        let mut ctrl3 = self.read_register(Register::Ctrl3Set).await?;
+        let ctrl3 = self.read_register(Register::Ctrl3Set).await?;
         let mut flags = Ctrl3Flags::from_bits_truncate(ctrl3);
 
         if improve_response {
@@ -1332,7 +1327,7 @@ where
         &mut self,
         use_low_bandwidth: bool,
     ) -> Result<(), Error<I2C::Error>> {
-        let mut ctrl3 = self.read_register(Register::Ctrl3Set).await?;
+        let ctrl3 = self.read_register(Register::Ctrl3Set).await?;
         let mut flags = Ctrl3Flags::from_bits_truncate(ctrl3);
 
         if use_low_bandwidth {
@@ -1357,7 +1352,7 @@ where
         &mut self,
         disable_foldback: bool,
     ) -> Result<(), Error<I2C::Error>> {
-        let mut ctrl3 = self.read_register(Register::Ctrl3Set).await?;
+        let ctrl3 = self.read_register(Register::Ctrl3Set).await?;
         let mut flags = Ctrl3Flags::from_bits_truncate(ctrl3);
 
         if disable_foldback {
@@ -1379,7 +1374,7 @@ where
     ///
     /// Returns `Ok(())` on success, or an `Error` if the operation fails.
     pub async fn set_ovp_protection(&mut self, disable_ovp: bool) -> Result<(), Error<I2C::Error>> {
-        let mut ctrl1 = self.read_register(Register::Ctrl1Set).await?;
+        let ctrl1 = self.read_register(Register::Ctrl1Set).await?;
         let mut flags = Ctrl1Flags::from_bits_truncate(ctrl1);
 
         if disable_ovp {
