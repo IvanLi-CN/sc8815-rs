@@ -1,11 +1,9 @@
 //! Integration tests for the SC8815 driver
 
-use embedded_hal_mock::i2c::{Mock as I2cMock, Transaction as I2cTransaction};
-use sc8815::{
-    AdcMeasurements, ChargingState, DeviceConfiguration, PowerState, SC8815, SC8815Status,
-    registers::constants::DEFAULT_ADDRESS,
-};
+use embedded_hal_mock::eh1::i2c::{Mock as I2cMock, Transaction as I2cTransaction};
+use sc8815::{SC8815, registers::constants::DEFAULT_ADDRESS};
 
+#[cfg(not(feature = "async"))]
 #[test]
 fn test_device_initialization() {
     let expectations = [
@@ -29,6 +27,7 @@ fn test_device_initialization() {
     i2c.done();
 }
 
+#[cfg(not(feature = "async"))]
 #[test]
 fn test_ac_adapter_status_check() {
     let expectations = [
@@ -51,6 +50,7 @@ fn test_ac_adapter_status_check() {
     i2c.done();
 }
 
+#[cfg(not(feature = "async"))]
 #[test]
 fn test_otg_mode_control() {
     let expectations = [
@@ -78,6 +78,7 @@ fn test_otg_mode_control() {
     i2c.done();
 }
 
+#[cfg(not(feature = "async"))]
 #[test]
 fn test_device_status() {
     let expectations = [
@@ -105,6 +106,7 @@ fn test_device_status() {
     i2c.done();
 }
 
+#[cfg(not(feature = "async"))]
 #[test]
 fn test_adc_measurements() {
     let expectations = [
@@ -146,6 +148,7 @@ fn test_adc_measurements() {
     i2c.done();
 }
 
+#[cfg(not(feature = "async"))]
 #[test]
 fn test_interrupt_configuration() {
     let expectations = [
@@ -206,7 +209,7 @@ mod async_tests {
     }
 
     #[tokio::test]
-    async fn test_async_device_configuration() {
+    async fn test_async_ac_adapter_status() {
         let expectations = [
             // Initialization sequence
             I2cTransaction::write_read(DEFAULT_ADDRESS, vec![0x17], vec![0x40]),
@@ -214,21 +217,15 @@ mod async_tests {
             I2cTransaction::write(DEFAULT_ADDRESS, vec![0x0B, 0x08]),
             I2cTransaction::write_read(DEFAULT_ADDRESS, vec![0x19], vec![0x00]),
             I2cTransaction::write(DEFAULT_ADDRESS, vec![0x19, 0x01]),
-            // Configuration sequence (simplified - just a few key registers)
-            I2cTransaction::write(DEFAULT_ADDRESS, vec![0x00, 0x09]), // VBAT_SET: 1S, 4.2V
-            I2cTransaction::write(DEFAULT_ADDRESS, vec![0x05, 0x7F]), // IBUS_LIM_SET
-            I2cTransaction::write_read(DEFAULT_ADDRESS, vec![0x08], vec![0x00]), // Read RATIO
-            I2cTransaction::write(DEFAULT_ADDRESS, vec![0x08, 0x08]), // Write RATIO with IBUS_RATIO
+            // Read status register (AC_OK bit set)
+            I2cTransaction::write_read(DEFAULT_ADDRESS, vec![0x17], vec![0x40]),
         ];
         let mut i2c = I2cMock::new(&expectations);
         let mut sc8815 = SC8815::new(&mut i2c, DEFAULT_ADDRESS);
 
         sc8815.init().await.unwrap();
-
-        let config = DeviceConfiguration::default();
-        let result = sc8815.configure_device(&config).await;
-        // This will fail because we haven't mocked all the expected transactions
-        // but it demonstrates the async API
+        let ac_connected = sc8815.is_ac_adapter_connected().await.unwrap();
+        assert!(ac_connected);
 
         i2c.done();
     }

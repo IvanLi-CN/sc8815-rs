@@ -24,7 +24,7 @@ async = ["dep:embedded-hal-async"]
 defmt = ["dep:defmt"]
 
 [dev-dependencies]
-embedded-hal-mock = "0.11.1"
+embedded-hal-mock = { version = "0.11.1", features = ["eh1", "embedded-hal-async"] }
 tokio = { version = "1.0", features = ["macros", "rt"] }
 
 [lib]

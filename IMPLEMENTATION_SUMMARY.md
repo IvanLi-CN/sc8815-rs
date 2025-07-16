@@ -125,7 +125,7 @@ println!("VBUS: {}mV, VBAT: {}mV", measurements.vbus_mv, measurements.vbat_mv);
 ### Device Configuration
 ```rust
 let mut config = DeviceConfiguration::default();
-config.battery.cell_count = 2; // 2S battery
+config.battery.cell_count = CellCount::Cells2S; // 2S battery
 config.current_limits.ibus_limit_ma = 2000; // 2A limit
 sc8815.configure_device(&config)?;
 ```
