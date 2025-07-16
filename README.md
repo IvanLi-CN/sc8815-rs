@@ -41,7 +41,7 @@ sc8815 = { version = "0.1.0", features = ["async", "defmt"] }
 ### Basic Usage
 
 ```rust
-use sc8815::{SC8815, DeviceConfiguration, OperatingMode, registers::constants::DEFAULT_ADDRESS};
+use sc8815::{SC8815, DeviceConfiguration, OperatingMode, CellCount, registers::constants::DEFAULT_ADDRESS};
 use embedded_hal::i2c::I2c;
 
 fn example<I2C: I2c>(mut i2c: I2C) -> Result<(), sc8815::error::Error<I2C::Error>>
@@ -67,7 +67,7 @@ where I2C::Error: core::fmt::Debug
 
     // Configure device with custom settings
     let mut config = DeviceConfiguration::default();
-    config.battery.cell_count = 2; // 2S battery
+    config.battery.cell_count = CellCount::Cells2S; // 2S battery
     config.battery.voltage_per_cell_mv = 4200; // 4.2V per cell
     config.current_limits.ibus_limit_ma = 2000; // 2A IBUS limit
     config.current_limits.ibat_limit_ma = 2000; // 2A IBAT limit
