@@ -2,8 +2,8 @@
 
 use embedded_hal_mock::i2c::{Mock as I2cMock, Transaction as I2cTransaction};
 use sc8815::{
-    registers::constants::DEFAULT_ADDRESS, AdcMeasurements, ChargingState, DeviceConfiguration,
-    PowerState, SC8815Status, SC8815,
+    AdcMeasurements, ChargingState, DeviceConfiguration, PowerState, SC8815, SC8815Status,
+    registers::constants::DEFAULT_ADDRESS,
 };
 
 #[test]

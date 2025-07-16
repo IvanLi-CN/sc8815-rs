@@ -39,7 +39,7 @@ pub enum Error<I2cError: Debug> {
 impl<I2cError: Debug> core::fmt::Display for Error<I2cError> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            Error::I2c(err) => write!(f, "I2C communication error: {:?}", err),
+            Error::I2c(err) => write!(f, "I2C communication error: {err:?}"),
             Error::InvalidRegisterOrParameter => write!(f, "Invalid register address or parameter"),
             Error::InvalidParameter => write!(f, "Invalid parameter value"),
             Error::DeviceNotResponding => write!(f, "Device not responding or device ID mismatch"),
