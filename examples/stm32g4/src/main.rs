@@ -16,7 +16,7 @@ use {defmt_rtt as _, panic_probe as _};
 use sc8815::{
     SC8815, DeviceConfiguration, BatteryConfiguration, CurrentLimitConfiguration,
     PowerConfiguration, OperatingMode, CellCount, IrCompensation, IbusRatio, IbatRatio,
-    SwitchingFrequency, DeadTime, VinregRatio, registers::constants::DEFAULT_ADDRESS,
+    SwitchingFrequency, DeadTime, VinregRatio, VoltagePerCell, registers::constants::DEFAULT_ADDRESS,
 };
 
 bind_interrupts!(struct Irqs {
@@ -75,7 +75,7 @@ async fn main(_spawner: Spawner) {
     let config = DeviceConfiguration {
         battery: BatteryConfiguration {
             cell_count: CellCount::Cells4S,   // 4S battery pack
-            voltage_per_cell_mv: 4200,        // 4.2V per cell
+            voltage_per_cell: VoltagePerCell::Mv4200,        // 4.2V per cell
             use_internal_setting: true,       // Use internal voltage reference
             ir_compensation_mohm: IrCompensation::Mohm20, // 20mΩ IR compensation
         },

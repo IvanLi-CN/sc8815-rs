@@ -25,7 +25,7 @@ use embassy_time::{Duration, Timer};
 use {defmt_rtt as _, panic_probe as _};
 
 use sc8815::{
-    SC8815, DeviceConfiguration, OperatingMode, CellCount, SwitchingFrequency, DeadTime,
+    SC8815, DeviceConfiguration, OperatingMode, CellCount, SwitchingFrequency, DeadTime, VoltagePerCell,
     registers::constants::DEFAULT_ADDRESS,
 };
 
@@ -103,7 +103,7 @@ async fn main(_spawner: Spawner) {
 
     // Configure for 4S LiFePO4 battery using internal voltage setting
     config.battery.cell_count = CellCount::Cells4S;
-    config.battery.voltage_per_cell_mv = 4450;
+    config.battery.voltage_per_cell = VoltagePerCell::Mv4450;
     config.battery.use_internal_setting = true;
 
     // Configure current limits with 5mΩ sense resistors

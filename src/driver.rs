@@ -1161,7 +1161,7 @@ where
     /// # Arguments
     ///
     /// * `cell_count` - Number of battery cells (1-4)
-    /// * `voltage_per_cell_mv` - Voltage per cell in millivolts (4100-4450mV)
+    /// * `voltage_per_cell` - Voltage per cell setting
     /// * `use_internal` - Whether to use internal voltage setting
     /// * `ir_comp_mohm` - IR compensation in milliohms (0, 20, 40, or 80)
     ///
@@ -1171,11 +1171,11 @@ where
     pub async fn configure_battery_voltage(
         &mut self,
         cell_count: u8,
-        voltage_per_cell_mv: u16,
+        voltage_per_cell: crate::VoltagePerCell,
         use_internal: bool,
         ir_comp_mohm: u8,
     ) -> Result<(), Error<I2C::Error>> {
-        if cell_count == 0 || cell_count > 4 || !(4100..=4450).contains(&voltage_per_cell_mv) {
+        if cell_count == 0 || cell_count > 4 {
             return Err(Error::InvalidParameter);
         }
 
@@ -1187,15 +1187,13 @@ where
             _ => return Err(Error::InvalidParameter),
         };
 
-        let vcell_setting = match voltage_per_cell_mv {
-            4100 => 0b000,
-            4200 => 0b001,
-            4250 => 0b010,
-            4300 => 0b011,
-            4350 => 0b100,
-            4400 => 0b101,
-            4450 => 0b110,
-            _ => return Err(Error::InvalidParameter),
+        let vcell_setting = match voltage_per_cell {
+            crate::VoltagePerCell::Mv4100 => 0b000,
+            crate::VoltagePerCell::Mv4200 => 0b001,
+            crate::VoltagePerCell::Mv4300 => 0b011,
+            crate::VoltagePerCell::Mv4350 => 0b100,
+            crate::VoltagePerCell::Mv4400 => 0b101,
+            crate::VoltagePerCell::Mv4450 => 0b110,
         };
 
         let csel_setting = match cell_count {
@@ -1410,7 +1408,7 @@ where
         // Configure battery settings
         self.configure_battery_voltage(
             config.battery.cell_count.into(),
-            config.battery.voltage_per_cell_mv,
+            config.battery.voltage_per_cell,
             config.battery.use_internal_setting,
             config.battery.ir_compensation_mohm.into(),
         )

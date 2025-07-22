@@ -275,6 +275,50 @@ pub enum IrCompensation {
     Mohm80 = 80,
 }
 
+/// Voltage per cell setting for battery configuration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub enum VoltagePerCell {
+    /// 4.1V per cell (4100mV).
+    Mv4100 = 4100,
+    /// 4.2V per cell (4200mV) - Standard Li-ion.
+    Mv4200 = 4200,
+    /// 4.3V per cell (4300mV).
+    Mv4300 = 4300,
+    /// 4.35V per cell (4350mV) - High voltage Li-ion.
+    Mv4350 = 4350,
+    /// 4.4V per cell (4400mV).
+    Mv4400 = 4400,
+    /// 4.45V per cell (4450mV) - LiFePO4.
+    Mv4450 = 4450,
+}
+
+impl Default for VoltagePerCell {
+    fn default() -> Self {
+        Self::Mv4200
+    }
+}
+
+impl From<VoltagePerCell> for u16 {
+    fn from(voltage: VoltagePerCell) -> Self {
+        voltage as u16
+    }
+}
+
+impl From<u16> for VoltagePerCell {
+    fn from(value: u16) -> Self {
+        match value {
+            4100 => Self::Mv4100,
+            4200 => Self::Mv4200,
+            4300 => Self::Mv4300,
+            4350 => Self::Mv4350,
+            4400 => Self::Mv4400,
+            4450 => Self::Mv4450,
+            _ => Self::Mv4200, // Default to 4.2V for invalid values
+        }
+    }
+}
+
 impl Default for IrCompensation {
     fn default() -> Self {
         Self::None
@@ -305,8 +349,8 @@ impl From<u8> for IrCompensation {
 pub struct BatteryConfiguration {
     /// Battery cell count.
     pub cell_count: CellCount,
-    /// Voltage per cell in millivolts (4100-4450mV).
-    pub voltage_per_cell_mv: u16,
+    /// Voltage per cell setting.
+    pub voltage_per_cell: VoltagePerCell,
     /// Whether to use internal or external VBAT voltage setting.
     pub use_internal_setting: bool,
     /// IR compensation setting.
@@ -317,7 +361,7 @@ impl Default for BatteryConfiguration {
     fn default() -> Self {
         Self {
             cell_count: CellCount::Cells1S,
-            voltage_per_cell_mv: 4200,
+            voltage_per_cell: VoltagePerCell::Mv4200,
             use_internal_setting: true,
             ir_compensation_mohm: IrCompensation::None,
         }
