@@ -116,21 +116,13 @@ fn test_adc_measurements() {
         I2cTransaction::write(DEFAULT_ADDRESS, vec![0x0B, 0x08]),
         I2cTransaction::write_read(DEFAULT_ADDRESS, vec![0x19], vec![0x00]),
         I2cTransaction::write(DEFAULT_ADDRESS, vec![0x19, 0x01]),
-        // Read VBUS ADC values (high and low bytes)
-        I2cTransaction::write_read(DEFAULT_ADDRESS, vec![0x0D], vec![0x80]), // VBUS_FB_VALUE
-        I2cTransaction::write_read(DEFAULT_ADDRESS, vec![0x0E], vec![0x40]), // VBUS_FB_VALUE2
-        // Read VBAT ADC values
-        I2cTransaction::write_read(DEFAULT_ADDRESS, vec![0x0F], vec![0x60]), // VBAT_FB_VALUE
-        I2cTransaction::write_read(DEFAULT_ADDRESS, vec![0x10], vec![0x80]), // VBAT_FB_VALUE2
-        // Read IBUS ADC values
-        I2cTransaction::write_read(DEFAULT_ADDRESS, vec![0x11], vec![0x40]), // IBUS_VALUE
-        I2cTransaction::write_read(DEFAULT_ADDRESS, vec![0x12], vec![0xC0]), // IBUS_VALUE2
-        // Read IBAT ADC values
-        I2cTransaction::write_read(DEFAULT_ADDRESS, vec![0x13], vec![0x30]), // IBAT_VALUE
-        I2cTransaction::write_read(DEFAULT_ADDRESS, vec![0x14], vec![0x00]), // IBAT_VALUE2
-        // Read ADIN ADC values
-        I2cTransaction::write_read(DEFAULT_ADDRESS, vec![0x15], vec![0x20]), // ADIN_VALUE
-        I2cTransaction::write_read(DEFAULT_ADDRESS, vec![0x16], vec![0x40]), // ADIN_VALUE2
+        // Read all ADC registers at once (10 bytes starting from VBUS_FB_VALUE 0x0D)
+        // This matches the read_all_adc_registers implementation
+        I2cTransaction::write_read(
+            DEFAULT_ADDRESS,
+            vec![0x0D], // VBUS_FB_VALUE register address
+            vec![0x80, 0x40, 0x60, 0x80, 0x40, 0xC0, 0x30, 0x00, 0x20, 0x40], // 10 bytes: VBUS_FB_VALUE, VBUS_FB_VALUE2, VBAT_FB_VALUE, VBAT_FB_VALUE2, IBUS_VALUE, IBUS_VALUE2, IBAT_VALUE, IBAT_VALUE2, ADIN_VALUE, ADIN_VALUE2
+        ),
     ];
     let mut i2c = I2cMock::new(&expectations);
     let mut sc8815 = SC8815::new(&mut i2c, DEFAULT_ADDRESS);

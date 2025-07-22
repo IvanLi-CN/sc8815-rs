@@ -6,8 +6,6 @@
 //! This crate provides a driver for the SC8815 power management IC.
 //! The SC8815 is a power management IC that supports charging management and power delivery control.
 //!
-//! Test formatting issue - this line has bad formatting
-//!
 //! ## Features
 //!
 //! - **Power Management**: Comprehensive power delivery control and monitoring
