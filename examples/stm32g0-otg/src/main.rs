@@ -241,8 +241,8 @@ async fn main(_spawner: Spawner) {
             }
         };
 
-        // Read ADC measurements
-        match sc8815.get_adc_measurements_with_config(&config.current_limits).await {
+        // Read ADC measurements (using the configuration stored in the driver)
+        match sc8815.get_adc_measurements().await {
             Ok(measurements) => {
                 info!("ADC Measurements:");
                 info!("  VBUS: {}mV", measurements.vbus_mv);
@@ -251,11 +251,8 @@ async fn main(_spawner: Spawner) {
                 info!("  IBAT: {}mA", measurements.ibat_ma);
                 info!("  ADIN: {}mV", measurements.adin_mv);
 
-                // Debug: Read raw IBUS registers for troubleshooting
-                if let (Ok(ibus_high), Ok(ibus_low)) = (
-                    sc8815.read_register(sc8815::registers::Register::IbusValue).await,
-                    sc8815.read_register(sc8815::registers::Register::IbusValue2).await,
-                ) {
+                // Debug: Read raw IBUS registers for troubleshooting using optimized consecutive read
+                if let Ok((ibus_high, ibus_low)) = sc8815.read_consecutive_registers(sc8815::registers::Register::IbusValue).await {
                     let ibus_value2 = (ibus_low >> 6) & 0x03;
                     info!("Raw IBUS registers: IBUS_VALUE={}, IBUS_VALUE2={}", ibus_high, ibus_value2);
                 }

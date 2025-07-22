@@ -4,8 +4,8 @@
 //! This driver provides methods to interact with the SC8815 for power management and charging control.
 
 use crate::data_types::{
-    AdcMeasurements, BatteryStatus, ChargingState, CurrentLimitConfiguration, DeviceConfiguration,
-    InputSourceStatus, OperatingMode, SC8815Status, ThermalStatus,
+    AdcMeasurements, BatteryStatus, ChargingState, DeviceConfiguration, InputSourceStatus,
+    OperatingMode, SC8815Status, ThermalStatus,
 };
 use crate::error::Error;
 use crate::registers::{
@@ -21,6 +21,134 @@ use embedded_hal_async::i2c::I2c;
 /// Type alias for ADC measurement results (VBUS, VBAT, IBUS, IBAT, ADIN in mV/mA)
 type AdcResults<E> = Result<(u16, u16, u16, u16, u16), Error<E>>;
 
+/// Type alias for all ADC register values (10 consecutive u8 values)
+type AllAdcRegisters<E> = Result<(u8, u8, u8, u8, u8, u8, u8, u8, u8, u8), Error<E>>;
+
+/// Internal ADC calculation functions
+impl AdcCalculations {
+    /// Combine high and low ADC register values into a 10-bit value.
+    #[inline]
+    pub fn combine_adc_registers(high: u8, low: u8) -> u16 {
+        ((high as u16) << 2) | (((low >> 6) & 0x03) as u16)
+    }
+
+    /// Get voltage ratio multiplier for VBUS/VBAT calculations.
+    #[inline]
+    pub fn get_voltage_ratio_multiplier(ratio: u8) -> Option<f32> {
+        match ratio {
+            0 => Some(12.5), // 12.5x ratio
+            1 => Some(5.0),  // 5x ratio
+            _ => None,
+        }
+    }
+
+    /// Calculate voltage from ADC value using the standard formula.
+    /// Formula: Voltage = (4 * ADC_VALUE + ADC_VALUE2 + 1) * RATIO * 2 mV
+    #[inline]
+    pub fn calculate_voltage_mv(high: u8, low: u8, ratio: u8) -> Option<u16> {
+        let adc_value = Self::combine_adc_registers(high, low);
+        let ratio_multiplier = Self::get_voltage_ratio_multiplier(ratio)?;
+        Some(((4 * adc_value + 1) as f32 * ratio_multiplier * 2.0) as u16)
+    }
+
+    /// Get current ratio multiplier for IBUS calculations.
+    #[inline]
+    pub fn get_ibus_ratio_multiplier(ratio: u8) -> Option<u8> {
+        match ratio {
+            1 => Some(6), // IbusRatio::Ratio6x = 1 -> 6x multiplier
+            2 => Some(3), // IbusRatio::Ratio3x = 2 -> 3x multiplier
+            _ => None,
+        }
+    }
+
+    /// Get current ratio multiplier for IBAT calculations.
+    #[inline]
+    pub fn get_ibat_ratio_multiplier(ratio: u8) -> Option<u8> {
+        match ratio {
+            0 => Some(6),  // IbatRatio::Ratio6x = 0 -> 6x multiplier
+            1 => Some(12), // IbatRatio::Ratio12x = 1 -> 12x multiplier
+            _ => None,
+        }
+    }
+
+    /// Calculate current from ADC value using the SC8815 formula.
+    /// Formula: Current (A) = [(4 × ADC_VALUE + ADC_VALUE2 + 1) × 2] / 1200 × RATIO × 10mΩ / RS
+    #[inline]
+    pub fn calculate_current_ma(high: u8, low: u8, ratio_multiplier: u8, rs_mohm: u16) -> u16 {
+        let adc_value = 4 * (high as u32) + ((low >> 6) & 0x03) as u32 + 1;
+        let numerator = adc_value * 2;
+        let current_a =
+            (numerator as f32 / 1200.0) * (ratio_multiplier as f32) * (10.0 / rs_mohm as f32);
+        (current_a * 1000.0) as u16
+    }
+
+    /// Calculate IBUS current from ADC registers.
+    #[inline]
+    pub fn calculate_ibus_current_ma(high: u8, low: u8, ratio: u8, rs1_mohm: u16) -> Option<u16> {
+        let ratio_multiplier = Self::get_ibus_ratio_multiplier(ratio)?;
+        Some(Self::calculate_current_ma(
+            high,
+            low,
+            ratio_multiplier,
+            rs1_mohm,
+        ))
+    }
+
+    /// Calculate IBAT current from ADC registers.
+    #[inline]
+    pub fn calculate_ibat_current_ma(high: u8, low: u8, ratio: u8, rs2_mohm: u16) -> Option<u16> {
+        let ratio_multiplier = Self::get_ibat_ratio_multiplier(ratio)?;
+        Some(Self::calculate_current_ma(
+            high,
+            low,
+            ratio_multiplier,
+            rs2_mohm,
+        ))
+    }
+
+    /// Calculate ADIN voltage from ADC registers.
+    /// Formula: VADIN = (4 * ADIN_VALUE + ADIN_VALUE2 + 1) * 2 mV
+    #[inline]
+    pub fn calculate_adin_voltage_mv(high: u8, low: u8) -> u16 {
+        let adc_value = Self::combine_adc_registers(high, low);
+        (4 * adc_value + 1) * 2
+    }
+}
+
+/// ADC calculation utilities
+pub struct AdcCalculations;
+
+/// ADC configuration stored in the driver for consistent measurements.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub struct AdcConfiguration {
+    /// VBUS ratio setting (0: 12.5x, 1: 5x)
+    pub vbus_ratio: u8,
+    /// VBAT monitor ratio setting (0: 12.5x, 1: 5x)
+    pub vbat_mon_ratio: u8,
+    /// IBUS ratio setting (1: 6x, 2: 3x)
+    pub ibus_ratio: u8,
+    /// IBAT ratio setting (0: 6x, 1: 12x)
+    pub ibat_ratio: u8,
+    /// VBUS side current sense resistor in milliohms
+    pub rs1_mohm: u16,
+    /// VBAT side current sense resistor in milliohms
+    pub rs2_mohm: u16,
+}
+
+impl Default for AdcConfiguration {
+    fn default() -> Self {
+        Self {
+            vbus_ratio: 0,     // 12.5x ratio (default)
+            vbat_mon_ratio: 0, // 12.5x ratio (default)
+            ibus_ratio: 2,     // 3x ratio (default)
+            ibat_ratio: 1,     // 12x ratio (default)
+            rs1_mohm: 10,      // 10mΩ (typical value)
+            rs2_mohm: 10,      // 10mΩ (typical value)
+        }
+    }
+}
+
 /// SC8815 power management IC driver.
 ///
 /// This driver provides a high-level interface to the SC8815 power management IC,
@@ -30,6 +158,8 @@ pub struct SC8815<I2C> {
     i2c: I2C,
     /// I2C address of the SC8815 device.
     address: u8,
+    /// ADC configuration for consistent measurements.
+    adc_config: AdcConfiguration,
 }
 
 #[maybe_async_cfg::maybe(
@@ -50,9 +180,13 @@ where
     ///
     /// # Returns
     ///
-    /// Returns a new `SC8815` driver instance.
+    /// Returns a new `SC8815` driver instance with default ADC configuration.
     pub fn new(i2c: I2C, address: u8) -> Self {
-        Self { i2c, address }
+        Self {
+            i2c,
+            address,
+            adc_config: AdcConfiguration::default(),
+        }
     }
 
     /// Release the I2C interface from the driver.
@@ -62,6 +196,20 @@ where
     /// Returns the I2C interface that was used by this driver.
     pub fn release(self) -> I2C {
         self.i2c
+    }
+
+    /// Internal method to update the ADC configuration stored in the driver.
+    fn update_adc_config(&mut self, config: AdcConfiguration) {
+        self.adc_config = config;
+    }
+
+    /// Get the current ADC configuration.
+    ///
+    /// # Returns
+    ///
+    /// Returns the current ADC configuration stored in the driver.
+    pub fn get_adc_config(&self) -> AdcConfiguration {
+        self.adc_config
     }
 
     /// Read a single register from the SC8815.
@@ -80,6 +228,44 @@ where
             .await
             .map_err(Error::I2c)?;
         Ok(buffer[0])
+    }
+
+    /// Read two consecutive registers from the SC8815.
+    ///
+    /// # Arguments
+    ///
+    /// * `start_register` - The first register to read from.
+    ///
+    /// # Returns
+    ///
+    /// Returns a tuple of (first_register_value, second_register_value) on success, or an `Error` if the operation fails.
+    pub async fn read_consecutive_registers(
+        &mut self,
+        start_register: Register,
+    ) -> Result<(u8, u8), Error<I2C::Error>> {
+        let mut buffer = [0u8; 2];
+        self.i2c
+            .write_read(self.address, &[start_register.addr()], &mut buffer)
+            .await
+            .map_err(Error::I2c)?;
+        Ok((buffer[0], buffer[1]))
+    }
+
+    /// Read all ADC registers at once (VBUS_FB_VALUE to ADIN_VALUE2).
+    ///
+    /// # Returns
+    ///
+    /// Returns a tuple of (vbus_high, vbus_low, vbat_high, vbat_low, ibus_high, ibus_low, ibat_high, ibat_low, adin_high, adin_low) on success, or an `Error` if the operation fails.
+    pub async fn read_all_adc_registers(&mut self) -> AllAdcRegisters<I2C::Error> {
+        let mut buffer = [0u8; 10];
+        self.i2c
+            .write_read(self.address, &[Register::VbusFbValue.addr()], &mut buffer)
+            .await
+            .map_err(Error::I2c)?;
+        Ok((
+            buffer[0], buffer[1], buffer[2], buffer[3], buffer[4], buffer[5], buffer[6], buffer[7],
+            buffer[8], buffer[9],
+        ))
     }
 
     /// Write a single register to the SC8815.
@@ -556,7 +742,13 @@ where
         // Set the ratio in the RATIO register
         let mut ratio_reg = self.read_register(Register::Ratio).await?;
         ratio_reg = (ratio_reg & !0x0C) | ((ratio & 0x03) << 2);
-        self.write_register(Register::Ratio, ratio_reg).await
+        self.write_register(Register::Ratio, ratio_reg).await?;
+
+        // Update internal ADC configuration
+        self.adc_config.ibus_ratio = ratio;
+        self.adc_config.rs1_mohm = rs1_mohm;
+
+        Ok(())
     }
 
     /// Set IBAT current limit.
@@ -609,7 +801,13 @@ where
         } else {
             ratio_reg &= !0x10; // Clear IBAT_RATIO bit
         }
-        self.write_register(Register::Ratio, ratio_reg).await
+        self.write_register(Register::Ratio, ratio_reg).await?;
+
+        // Update internal ADC configuration
+        self.adc_config.ibat_ratio = ratio;
+        self.adc_config.rs2_mohm = rs2_mohm;
+
+        Ok(())
     }
 
     /// Set VINREG voltage threshold for charging mode.
@@ -676,24 +874,14 @@ where
             return Err(Error::InvalidParameter);
         }
 
-        // Read the 10-bit ADC value (high 8 bits + low 2 bits)
-        let vbus_fb_high = self.read_register(Register::VbusFbValue).await?;
-        let vbus_fb_low = self.read_register(Register::VbusFbValue2).await?;
+        // Read the 10-bit ADC value (high 8 bits + low 2 bits) in one I2C transaction
+        let (vbus_fb_high, vbus_fb_low) = self
+            .read_consecutive_registers(Register::VbusFbValue)
+            .await?;
 
-        // Combine to get 10-bit value
-        let vbus_fb_value = ((vbus_fb_high as u16) << 2) | (((vbus_fb_low >> 6) & 0x03) as u16);
-
-        // Calculate voltage based on formula:
-        // VBUS = (4 * VBUS_FB_VALUE + VBUS_FB_VALUE2 + 1) * VBUS_RATIO * 2 mV
-        let ratio_multiplier = match vbus_ratio {
-            0 => 12.5,
-            1 => 5.0,
-            _ => return Err(Error::InvalidParameter),
-        };
-
-        let voltage_mv = ((4 * vbus_fb_value + 1) as f32 * ratio_multiplier * 2.0) as u16;
-
-        Ok(voltage_mv)
+        // Calculate voltage using the centralized calculation function
+        AdcCalculations::calculate_voltage_mv(vbus_fb_high, vbus_fb_low, vbus_ratio)
+            .ok_or(Error::InvalidParameter)
     }
 
     /// Read VBAT voltage from ADC.
@@ -713,24 +901,14 @@ where
             return Err(Error::InvalidParameter);
         }
 
-        // Read the 10-bit ADC value (high 8 bits + low 2 bits)
-        let vbat_fb_high = self.read_register(Register::VbatFbValue).await?;
-        let vbat_fb_low = self.read_register(Register::VbatFbValue2).await?;
+        // Read the 10-bit ADC value (high 8 bits + low 2 bits) in one I2C transaction
+        let (vbat_fb_high, vbat_fb_low) = self
+            .read_consecutive_registers(Register::VbatFbValue)
+            .await?;
 
-        // Calculate voltage based on formula:
-        // VBAT = (4 * VBAT_FB_VALUE + VBAT_FB_VALUE2 + 1) * VBAT_MON_RATIO * 2 mV
-        let ratio_multiplier = match vbat_mon_ratio {
-            0 => 12.5,
-            1 => 5.0,
-            _ => return Err(Error::InvalidParameter),
-        };
-
-        let voltage_mv = ((4 * (vbat_fb_high as u16) + ((vbat_fb_low >> 6) & 0x03) as u16 + 1)
-            as f32
-            * ratio_multiplier
-            * 2.0) as u16;
-
-        Ok(voltage_mv)
+        // Calculate voltage using the centralized calculation function
+        AdcCalculations::calculate_voltage_mv(vbat_fb_high, vbat_fb_low, vbat_mon_ratio)
+            .ok_or(Error::InvalidParameter)
     }
 
     /// Read IBUS current from ADC.
@@ -752,31 +930,12 @@ where
             return Err(Error::InvalidParameter);
         }
 
-        // Read the 10-bit ADC value (high 8 bits + low 2 bits)
-        let ibus_high = self.read_register(Register::IbusValue).await?;
-        let ibus_low = self.read_register(Register::IbusValue2).await?;
+        // Read the 10-bit ADC value (high 8 bits + low 2 bits) in one I2C transaction
+        let (ibus_high, ibus_low) = self.read_consecutive_registers(Register::IbusValue).await?;
 
-        // Calculate current based on SC8815 manual formula (from screenshot):
-        // IBUS (A) = [(4 × IBUS_VALUE + IBUS_VALUE2 + 1) × 2] / 1200 × IBUS_RATIO × 10mΩ / RS1
-        //
-        // Where IBUS_RATIO is the actual multiplier value (6x or 3x)
-        let ratio_multiplier = match ibus_ratio {
-            1 => 6, // IbusRatio::Ratio6x = 1 -> 6x multiplier
-            2 => 3, // IbusRatio::Ratio3x = 2 -> 3x multiplier
-            _ => return Err(Error::InvalidParameter),
-        };
-
-        // Apply the correct formula from manual:
-        // Step 1: Calculate (4 × IBUS_VALUE + IBUS_VALUE2 + 1) × 2
-        let adc_value = 4 * (ibus_high as u32) + ((ibus_low >> 6) & 0x03) as u32 + 1;
-        let numerator = adc_value * 2;
-
-        // Step 2: Apply the formula: numerator / 1200 × IBUS_RATIO × 10mΩ / RS1
-        let current_a =
-            (numerator as f32 / 1200.0) * (ratio_multiplier as f32) * (10.0 / rs1_mohm as f32);
-        let current_ma = (current_a * 1000.0) as u16;
-
-        Ok(current_ma)
+        // Calculate current using the centralized calculation function
+        AdcCalculations::calculate_ibus_current_ma(ibus_high, ibus_low, ibus_ratio, rs1_mohm)
+            .ok_or(Error::InvalidParameter)
     }
 
     /// Read IBAT current from ADC.
@@ -798,31 +957,12 @@ where
             return Err(Error::InvalidParameter);
         }
 
-        // Read the 10-bit ADC value (high 8 bits + low 2 bits)
-        let ibat_high = self.read_register(Register::IbatValue).await?;
-        let ibat_low = self.read_register(Register::IbatValue2).await?;
+        // Read the 10-bit ADC value (high 8 bits + low 2 bits) in one I2C transaction
+        let (ibat_high, ibat_low) = self.read_consecutive_registers(Register::IbatValue).await?;
 
-        // Calculate current based on SC8815 manual formula (from screenshot):
-        // IBAT (A) = [(4 × IBAT_VALUE + IBAT_VALUE2 + 1) × 2] / 1200 × IBAT_RATIO × 10mΩ / RS2
-        //
-        // Where IBAT_RATIO is the actual multiplier value (6x or 12x)
-        let ratio_multiplier = match ibat_ratio {
-            0 => 6,  // IbatRatio::Ratio6x = 0 -> 6x multiplier
-            1 => 12, // IbatRatio::Ratio12x = 1 -> 12x multiplier
-            _ => return Err(Error::InvalidParameter),
-        };
-
-        // Apply the correct formula from manual:
-        // Step 1: Calculate (4 × IBAT_VALUE + IBAT_VALUE2 + 1) × 2
-        let adc_value = 4 * (ibat_high as u32) + ((ibat_low >> 6) & 0x03) as u32 + 1;
-        let numerator = adc_value * 2;
-
-        // Step 2: Apply the formula: numerator / 1200 × IBAT_RATIO × 10mΩ / RS2
-        let current_a =
-            (numerator as f32 / 1200.0) * (ratio_multiplier as f32) * (10.0 / rs2_mohm as f32);
-        let current_ma = (current_a * 1000.0) as u16;
-
-        Ok(current_ma)
+        // Calculate current using the centralized calculation function
+        AdcCalculations::calculate_ibat_current_ma(ibat_high, ibat_low, ibat_ratio, rs2_mohm)
+            .ok_or(Error::InvalidParameter)
     }
 
     /// Read ADIN voltage from ADC.
@@ -831,45 +971,75 @@ where
     ///
     /// Returns ADIN voltage in millivolts (maximum 2048mV), or an `Error` if the operation fails.
     pub async fn read_adin_voltage(&mut self) -> Result<u16, Error<I2C::Error>> {
-        // Read the 10-bit ADC value (high 8 bits + low 2 bits)
-        let adin_high = self.read_register(Register::AdinValue).await?;
-        let adin_low = self.read_register(Register::AdinValue2).await?;
+        // Read the 10-bit ADC value (high 8 bits + low 2 bits) in one I2C transaction
+        let (adin_high, adin_low) = self.read_consecutive_registers(Register::AdinValue).await?;
 
-        // Calculate voltage based on formula:
-        // VADIN = (4 * ADIN_VALUE + ADIN_VALUE2 + 1) * 2 mV
-        let voltage_mv = (4 * (adin_high as u16) + ((adin_low >> 6) & 0x03) as u16 + 1) * 2;
-
-        Ok(voltage_mv)
+        // Calculate voltage using the centralized calculation function
+        Ok(AdcCalculations::calculate_adin_voltage_mv(
+            adin_high, adin_low,
+        ))
     }
 
-    /// Read all ADC values at once.
-    ///
-    /// # Arguments
-    ///
-    /// * `vbus_ratio` - VBUS ratio setting (0: 12.5x, 1: 5x)
-    /// * `vbat_mon_ratio` - VBAT monitor ratio setting (0: 12.5x, 1: 5x)
-    /// * `ibus_ratio` - IBUS ratio setting (1: 6x, 2: 3x)
-    /// * `ibat_ratio` - IBAT ratio setting (0: 6x, 1: 12x)
-    /// * `rs1_mohm` - VBUS side current sense resistor in milliohms
-    /// * `rs2_mohm` - VBAT side current sense resistor in milliohms
+    /// Read all ADC values at once using optimized I2C burst read.
+    /// Uses the ADC configuration stored in the driver instance.
     ///
     /// # Returns
     ///
     /// Returns tuple of (VBUS_mV, VBAT_mV, IBUS_mA, IBAT_mA, ADIN_mV), or an `Error` if the operation fails.
-    pub async fn read_all_adc_values(
-        &mut self,
-        vbus_ratio: u8,
-        vbat_mon_ratio: u8,
-        ibus_ratio: u8,
-        ibat_ratio: u8,
-        rs1_mohm: u16,
-        rs2_mohm: u16,
-    ) -> AdcResults<I2C::Error> {
-        let vbus_mv = self.read_vbus_voltage(vbus_ratio).await?;
-        let vbat_mv = self.read_vbat_voltage(vbat_mon_ratio).await?;
-        let ibus_ma = self.read_ibus_current(ibus_ratio, rs1_mohm).await?;
-        let ibat_ma = self.read_ibat_current(ibat_ratio, rs2_mohm).await?;
-        let adin_mv = self.read_adin_voltage().await?;
+    pub async fn read_all_adc_values(&mut self) -> AdcResults<I2C::Error> {
+        let config = self.adc_config;
+        // Validate parameters
+        if config.vbus_ratio > 1
+            || config.vbat_mon_ratio > 1
+            || config.ibus_ratio == 0
+            || config.ibus_ratio > 2
+            || config.ibat_ratio > 1
+            || config.rs1_mohm == 0
+            || config.rs2_mohm == 0
+        {
+            return Err(Error::InvalidParameter);
+        }
+
+        // Read all ADC registers in one I2C transaction (10 consecutive registers)
+        let (
+            vbus_fb_high,
+            vbus_fb_low,
+            vbat_fb_high,
+            vbat_fb_low,
+            ibus_high,
+            ibus_low,
+            ibat_high,
+            ibat_low,
+            adin_high,
+            adin_low,
+        ) = self.read_all_adc_registers().await?;
+
+        // Calculate all ADC values using centralized calculation functions
+        let vbus_mv =
+            AdcCalculations::calculate_voltage_mv(vbus_fb_high, vbus_fb_low, config.vbus_ratio)
+                .ok_or(Error::InvalidParameter)?;
+
+        let vbat_mv =
+            AdcCalculations::calculate_voltage_mv(vbat_fb_high, vbat_fb_low, config.vbat_mon_ratio)
+                .ok_or(Error::InvalidParameter)?;
+
+        let ibus_ma = AdcCalculations::calculate_ibus_current_ma(
+            ibus_high,
+            ibus_low,
+            config.ibus_ratio,
+            config.rs1_mohm,
+        )
+        .ok_or(Error::InvalidParameter)?;
+
+        let ibat_ma = AdcCalculations::calculate_ibat_current_ma(
+            ibat_high,
+            ibat_low,
+            config.ibat_ratio,
+            config.rs2_mohm,
+        )
+        .ok_or(Error::InvalidParameter)?;
+
+        let adin_mv = AdcCalculations::calculate_adin_voltage_mv(adin_high, adin_low);
 
         Ok((vbus_mv, vbat_mv, ibus_ma, ibat_ma, adin_mv))
     }
@@ -1054,11 +1224,8 @@ where
         // Calculate reference voltage based on formula:
         // VBUS = VBUSREF_I * VBUS_RATIO
         // VBUSREF_I = (4 * VBUSREF_I_SET + VBUSREF_I_SET2 + 1) * 2 mV
-        let ratio_multiplier = match vbus_ratio {
-            0 => 12.5,
-            1 => 5.0,
-            _ => return Err(Error::InvalidParameter),
-        };
+        let ratio_multiplier = AdcCalculations::get_voltage_ratio_multiplier(vbus_ratio)
+            .ok_or(Error::InvalidParameter)?;
 
         let vbusref_i_mv = voltage_mv as f32 / ratio_multiplier;
         if !(2.0..=2048.0).contains(&vbusref_i_mv) {
@@ -1088,6 +1255,9 @@ where
             ratio_reg &= !0x01; // Clear VBUS_RATIO bit
         }
         self.write_register(Register::Ratio, ratio_reg).await?;
+
+        // Update internal ADC configuration
+        self.adc_config.vbus_ratio = vbus_ratio;
 
         // Ensure FB_SEL is set to 0 for internal reference
         let ctrl1 = self.read_register(Register::Ctrl1Set).await?;
@@ -1212,7 +1382,35 @@ where
         }
         vbat_set |= ir_comp_setting << 6; // bits 7-6
 
-        self.write_register(Register::VbatSet, vbat_set).await
+        self.write_register(Register::VbatSet, vbat_set).await?;
+
+        // Set VBAT monitor ratio based on expected battery voltage
+        // For higher voltages (>10.24V), use 12.5x ratio; for lower voltages, use 5x ratio
+        let total_voltage_mv = cell_count as u16
+            * match voltage_per_cell {
+                crate::VoltagePerCell::Mv4100 => 4100,
+                crate::VoltagePerCell::Mv4200 => 4200,
+                crate::VoltagePerCell::Mv4300 => 4300,
+                crate::VoltagePerCell::Mv4350 => 4350,
+                crate::VoltagePerCell::Mv4400 => 4400,
+                crate::VoltagePerCell::Mv4450 => 4450,
+            };
+
+        let vbat_mon_ratio = if total_voltage_mv > 10240 { 0 } else { 1 }; // 0: 12.5x, 1: 5x
+
+        // Set VBAT monitor ratio in RATIO register
+        let mut ratio_reg = self.read_register(Register::Ratio).await?;
+        if vbat_mon_ratio == 1 {
+            ratio_reg |= 0x02; // Set VBAT_MON_RATIO bit
+        } else {
+            ratio_reg &= !0x02; // Clear VBAT_MON_RATIO bit
+        }
+        self.write_register(Register::Ratio, ratio_reg).await?;
+
+        // Update internal ADC configuration
+        self.adc_config.vbat_mon_ratio = vbat_mon_ratio;
+
+        Ok(())
     }
 
     /// Set trickle charge threshold.
@@ -1451,6 +1649,17 @@ where
         self.set_charging_current_selection(!config.use_ibus_for_charging)
             .await?;
 
+        // Update ADC configuration in the driver to match the device configuration
+        let adc_config = AdcConfiguration {
+            vbus_ratio: 0, // Default to 12.5x ratio (could be read from RATIO register if needed)
+            vbat_mon_ratio: 0, // Default to 12.5x ratio (could be read from RATIO register if needed)
+            ibus_ratio: config.current_limits.ibus_ratio.into(),
+            ibat_ratio: config.current_limits.ibat_ratio.into(),
+            rs1_mohm: config.current_limits.rs1_mohm,
+            rs2_mohm: config.current_limits.rs2_mohm,
+        };
+        self.update_adc_config(adc_config);
+
         Ok(())
     }
 
@@ -1471,56 +1680,19 @@ where
         })
     }
 
-    /// Get all ADC measurements with default ratios.
+    /// Get all ADC measurements using the current ADC configuration stored in the driver.
     ///
     /// # Returns
     ///
     /// Returns ADC measurements structure, or an `Error` if the operation fails.
+    ///
+    /// # Note
+    ///
+    /// This function uses the ADC configuration stored in the driver instance.
+    /// Make sure to call `update_adc_config()` or configure the device properly
+    /// before calling this function to ensure accurate measurements.
     pub async fn get_adc_measurements(&mut self) -> Result<AdcMeasurements, Error<I2C::Error>> {
-        // Use default ratios and resistor values
-        let (vbus_mv, vbat_mv, ibus_ma, ibat_ma, adin_mv) = self
-            .read_all_adc_values(
-                0,  // VBUS ratio: 12.5x
-                0,  // VBAT ratio: 12.5x
-                2,  // IBUS ratio: 3x
-                1,  // IBAT ratio: 12x
-                10, // RS1: 10mΩ
-                10, // RS2: 10mΩ
-            )
-            .await?;
-
-        Ok(AdcMeasurements {
-            vbus_mv,
-            vbat_mv,
-            ibus_ma,
-            ibat_ma,
-            adin_mv,
-        })
-    }
-
-    /// Get all ADC measurements with custom configuration.
-    ///
-    /// # Arguments
-    ///
-    /// * `current_config` - Current limit configuration containing ratio and resistor settings
-    ///
-    /// # Returns
-    ///
-    /// Returns ADC measurements structure, or an `Error` if the operation fails.
-    pub async fn get_adc_measurements_with_config(
-        &mut self,
-        current_config: &CurrentLimitConfiguration,
-    ) -> Result<AdcMeasurements, Error<I2C::Error>> {
-        let (vbus_mv, vbat_mv, ibus_ma, ibat_ma, adin_mv) = self
-            .read_all_adc_values(
-                0, // VBUS ratio: 12.5x (read from RATIO register if needed)
-                0, // VBAT ratio: 12.5x (read from RATIO register if needed)
-                current_config.ibus_ratio.into(),
-                current_config.ibat_ratio.into(),
-                current_config.rs1_mohm,
-                current_config.rs2_mohm,
-            )
-            .await?;
+        let (vbus_mv, vbat_mv, ibus_ma, ibat_ma, adin_mv) = self.read_all_adc_values().await?;
 
         Ok(AdcMeasurements {
             vbus_mv,
