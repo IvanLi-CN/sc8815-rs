@@ -46,9 +46,11 @@ impl AdcCalculations {
     /// Formula: Voltage = (4 * ADC_VALUE + ADC_VALUE2 + 1) * RATIO * 2 mV
     #[inline]
     pub fn calculate_voltage_mv(high: u8, low: u8, ratio: u8) -> Option<u16> {
-        let adc_value = Self::combine_adc_registers(high, low);
         let ratio_multiplier = Self::get_voltage_ratio_multiplier(ratio)?;
-        Some(((4 * adc_value + 1) as f32 * ratio_multiplier * 2.0) as u16)
+        let adc_value2 = (low >> 6) & 0x03;
+        let voltage_mv =
+            (4 * (high as u32) + (adc_value2 as u32) + 1) as f32 * ratio_multiplier * 2.0;
+        Some(voltage_mv as u16)
     }
 
     /// Get current ratio multiplier for IBUS calculations.
@@ -72,13 +74,14 @@ impl AdcCalculations {
     }
 
     /// Calculate current from ADC value using the SC8815 formula.
-    /// Formula: Current (A) = [(4 × ADC_VALUE + ADC_VALUE2 + 1) × 2] / 1200 × RATIO × 10mΩ / RS
+    /// Formula: Current (A) = (4 × ADC_VALUE + ADC_VALUE2 + 1) × 2 × 10mΩ × RATIO / (1200 × RS)
     #[inline]
     pub fn calculate_current_ma(high: u8, low: u8, ratio_multiplier: u8, rs_mohm: u16) -> u16 {
-        let adc_value = 4 * (high as u32) + ((low >> 6) & 0x03) as u32 + 1;
-        let numerator = adc_value * 2;
-        let current_a =
-            (numerator as f32 / 1200.0) * (ratio_multiplier as f32) * (10.0 / rs_mohm as f32);
+        let adc_value2 = (low >> 6) & 0x03;
+        let adc_combined = 4 * (high as u32) + (adc_value2 as u32) + 1;
+        let numerator = adc_combined * 2 * 10 * (ratio_multiplier as u32);
+        let denominator = 1200 * (rs_mohm as u32);
+        let current_a = numerator as f32 / denominator as f32;
         (current_a * 1000.0) as u16
     }
 
@@ -110,8 +113,9 @@ impl AdcCalculations {
     /// Formula: VADIN = (4 * ADIN_VALUE + ADIN_VALUE2 + 1) * 2 mV
     #[inline]
     pub fn calculate_adin_voltage_mv(high: u8, low: u8) -> u16 {
-        let adc_value = Self::combine_adc_registers(high, low);
-        (4 * adc_value + 1) * 2
+        let adc_value2 = (low >> 6) & 0x03;
+        let adc_combined = 4 * (high as u16) + (adc_value2 as u16) + 1;
+        adc_combined * 2
     }
 }
 
@@ -143,8 +147,8 @@ impl Default for AdcConfiguration {
             vbat_mon_ratio: 0, // 12.5x ratio (default)
             ibus_ratio: 2,     // 3x ratio (default)
             ibat_ratio: 1,     // 12x ratio (default)
-            rs1_mohm: 10,      // 10mΩ (typical value)
-            rs2_mohm: 10,      // 10mΩ (typical value)
+            rs1_mohm: 5,       // 5mΩ (user's configuration)
+            rs2_mohm: 5,       // 5mΩ (user's configuration)
         }
     }
 }

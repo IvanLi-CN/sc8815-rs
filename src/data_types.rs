@@ -457,8 +457,8 @@ impl Default for CurrentLimitConfiguration {
             ibus_ratio: IbusRatio::Ratio3x,
             ibat_limit_ma: 3000,
             ibat_ratio: IbatRatio::Ratio12x,
-            rs1_mohm: 10,
-            rs2_mohm: 10,
+            rs1_mohm: 5, // 5mΩ (user's configuration)
+            rs2_mohm: 5, // 5mΩ (user's configuration)
         }
     }
 }
