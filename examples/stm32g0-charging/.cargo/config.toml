@@ -1,5 +1,5 @@
 [target.'cfg(all(target_arch = "arm", target_os = "none"))']
-runner = "probe-rs run --chip STM32G431CBUx" # to list chips, run `probe-rs chip list.`
+runner = "probe-rs run --chip STM32G031C8Ux" # to list chips, run `probe-rs chip list.`
 
 rustflags = [
   "-C", "link-arg=-Tlink.x",
@@ -10,7 +10,7 @@ rustflags = [
 ]
 
 [build]
-target = "thumbv7em-none-eabihf"    # Cortex-M4F
+target = "thumbv6m-none-eabi"    # Cortex-M0+
 
 [env]
 DEFMT_LOG = "info"

@@ -1,5 +1,5 @@
 [package]
-name = "sc8815_stm32g071rb_charging_example"
+name = "sc8815_stm32g031c8u6_charging_example"
 version = "0.1.0"
 edition = "2024"
 
@@ -7,7 +7,7 @@ edition = "2024"
 embassy-stm32 = { git = "https://github.com/embassy-rs/embassy.git", rev = "94f9b2707486ca3eade5bf4b237edf3d6aa90f35", features = [
   "defmt",
   "time-driver-any",
-  "stm32g071rb",
+  "stm32g031c8",
   "memory-x",
   "unstable-pac",
   "exti",
