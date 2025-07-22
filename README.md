@@ -41,7 +41,7 @@ sc8815 = { version = "0.1.0", features = ["async", "defmt"] }
 ### Basic Usage
 
 ```rust
-use sc8815::{SC8815, DeviceConfiguration, OperatingMode, CellCount, registers::constants::DEFAULT_ADDRESS};
+use sc8815::{SC8815, DeviceConfiguration, OperatingMode, CellCount, VoltagePerCell, registers::constants::DEFAULT_ADDRESS};
 use embedded_hal::i2c::I2c;
 
 fn example<I2C: I2c>(mut i2c: I2C) -> Result<(), sc8815::error::Error<I2C::Error>>
@@ -68,7 +68,7 @@ where I2C::Error: core::fmt::Debug
     // Configure device with custom settings
     let mut config = DeviceConfiguration::default();
     config.battery.cell_count = CellCount::Cells2S; // 2S battery
-    config.battery.voltage_per_cell_mv = 4200; // 4.2V per cell
+    config.battery.voltage_per_cell = VoltagePerCell::Mv4200; // 4.2V per cell
     config.current_limits.ibus_limit_ma = 2000; // 2A IBUS limit
     config.current_limits.ibat_limit_ma = 2000; // 2A IBAT limit
     config.power.operating_mode = OperatingMode::Charging;
@@ -143,7 +143,7 @@ This driver is designed for the SC8815 power management IC. The SC8815 is a vers
 ### Core Features
 - **Dual-mode operation**: Charging mode and OTG (On-The-Go) discharging mode
 - **Multi-cell battery support**: 1S to 4S battery configurations
-- **Programmable voltage**: 4.1V to 4.45V per cell in 50mV steps
+- **Programmable voltage**: 4.1V to 4.45V per cell (4.1V, 4.2V, 4.3V, 4.35V, 4.4V, 4.45V)
 - **Current monitoring**: Separate IBUS and IBAT current sensing
 - **10-bit ADC**: High-resolution voltage and current measurements
 - **I2C interface**: 7-bit address 0x74, standard I2C protocol
