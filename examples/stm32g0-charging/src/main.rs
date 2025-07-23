@@ -87,6 +87,10 @@ async fn main(_spawner: Spawner) {
         Err(e) => {
             error!("I2C communication failed: {:?}", e);
 
+            // SAFETY: Immediately disable SC8815 by pulling PSTOP high
+            error!("SAFETY: Disabling SC8815 due to I2C communication failure");
+            pstop.set_high(); // Disable SC8815 chip for safety
+
             // If driver communication fails, perform I2C scan for diagnostics
             info!("Performing I2C scan to detect devices...");
 
@@ -117,6 +121,11 @@ async fn main(_spawner: Spawner) {
     info!("Initializing SC8815...");
     if let Err(e) = sc8815_driver.init().await {
         error!("Failed to initialize SC8815: {:?}", e);
+
+        // SAFETY: Immediately disable SC8815 by pulling PSTOP high
+        error!("SAFETY: Disabling SC8815 due to initialization failure");
+        pstop.set_high(); // Disable SC8815 chip for safety
+
         // Blink LED slowly to indicate init error
         loop {
             led.toggle();
@@ -153,6 +162,11 @@ async fn main(_spawner: Spawner) {
     info!("Configuring SC8815 for Charger mode (4S LiFePO4, 1A charging)...");
     if let Err(e) = sc8815_driver.configure_device(&config).await {
         error!("Failed to configure SC8815: {:?}", e);
+
+        // SAFETY: Immediately disable SC8815 by pulling PSTOP high
+        error!("SAFETY: Disabling SC8815 due to configuration failure");
+        pstop.set_high(); // Disable SC8815 chip for safety
+
         // Blink LED rapidly to indicate configuration error
         loop {
             led.toggle();
@@ -165,6 +179,11 @@ async fn main(_spawner: Spawner) {
     info!("Enabling charging mode...");
     if let Err(e) = sc8815_driver.set_otg_mode(false).await {
         error!("Failed to enable charging mode: {:?}", e);
+
+        // SAFETY: Immediately disable SC8815 by pulling PSTOP high
+        error!("SAFETY: Disabling SC8815 due to charging mode configuration failure");
+        pstop.set_high(); // Disable SC8815 chip for safety
+
         // Blink LED rapidly to indicate charging mode error
         loop {
             led.toggle();
@@ -176,6 +195,11 @@ async fn main(_spawner: Spawner) {
     // Enable ADC conversion
     if let Err(e) = sc8815_driver.set_adc_conversion(true).await {
         error!("Failed to start ADC conversion: {:?}", e);
+
+        // SAFETY: Immediately disable SC8815 by pulling PSTOP high
+        error!("SAFETY: Disabling SC8815 due to ADC configuration failure");
+        pstop.set_high(); // Disable SC8815 chip for safety
+
         // Blink LED rapidly to indicate ADC error
         loop {
             led.toggle();
@@ -236,7 +260,16 @@ async fn main(_spawner: Spawner) {
             }
             Err(e) => {
                 error!("Failed to read device status: {:?}", e);
-                continue;
+
+                // SAFETY: If we can't communicate with SC8815, disable it for safety
+                error!("SAFETY: Disabling SC8815 due to status read failure");
+                pstop.set_high(); // Disable SC8815 chip for safety
+
+                // Blink LED rapidly to indicate communication error
+                loop {
+                    led.toggle();
+                    Timer::after(Duration::from_millis(250)).await;
+                }
             }
         };
 
@@ -273,6 +306,11 @@ async fn main(_spawner: Spawner) {
         }
 
         // LED control based on charging status
+        // LED patterns:
+        // - Fast blink (250ms): Fault condition
+        // - Solid on: Charging complete (EOC)
+        // - Medium blink (1s): Charging in progress
+        // - Slow blink (2s): System ready, no AC adapter
         let current_time = embassy_time::Instant::now();
         let has_fault = status.otp_fault || status.vbus_short_fault;
 
@@ -285,7 +323,7 @@ async fn main(_spawner: Spawner) {
             }
         } else if status.eoc {
             // Charging complete: LED constantly on
-            led.set_low(); // Turn on LED (assuming active low)
+            led.set_low(); // Turn on LED (active low)
         } else if status.ac_adapter_connected {
             // Charging in progress: 1 second on, 1 second off
             if current_time.duration_since(last_led_toggle) >= Duration::from_secs(1) {
@@ -294,8 +332,12 @@ async fn main(_spawner: Spawner) {
                 last_led_toggle = current_time;
             }
         } else {
-            // No AC adapter: LED off
-            led.set_high(); // Turn off LED (assuming active low)
+            // No AC adapter: LED slow blink to indicate system is ready but not charging
+            if current_time.duration_since(last_led_toggle) >= Duration::from_secs(2) {
+                led.toggle();
+                led_state = !led_state;
+                last_led_toggle = current_time;
+            }
         }
 
         info!("----------------------------");

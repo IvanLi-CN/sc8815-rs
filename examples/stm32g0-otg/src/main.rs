@@ -74,6 +74,11 @@ async fn main(_spawner: Spawner) {
         }
         Err(e) => {
             error!("I2C communication failed: {:?}", e);
+
+            // SAFETY: Immediately disable SC8815 by pulling PSTOP high
+            error!("SAFETY: Disabling SC8815 due to I2C communication failure");
+            pstop.set_high(); // Disable SC8815 chip for safety
+
             // Blink LED slowly to indicate I2C error with SC8815
             loop {
                 led.toggle();
@@ -90,6 +95,11 @@ async fn main(_spawner: Spawner) {
         }
         Err(e) => {
             error!("Failed to initialize SC8815: {:?}", e);
+
+            // SAFETY: Immediately disable SC8815 by pulling PSTOP high
+            error!("SAFETY: Disabling SC8815 due to initialization failure");
+            pstop.set_high(); // Disable SC8815 chip for safety
+
             // Blink LED slowly to indicate init error
             loop {
                 led.toggle();
@@ -134,6 +144,16 @@ async fn main(_spawner: Spawner) {
     info!("Configuring SC8815 for OTG mode (19V output, 1.5A limit)...");
     if let Err(e) = sc8815.configure_device(&config).await {
         error!("Failed to configure SC8815: {:?}", e);
+
+        // SAFETY: Immediately disable SC8815 by pulling PSTOP high
+        error!("SAFETY: Disabling SC8815 due to configuration failure");
+        pstop.set_high(); // Disable SC8815 chip for safety
+
+        // Blink LED rapidly to indicate configuration error
+        loop {
+            led.toggle();
+            Timer::after(Duration::from_millis(250)).await;
+        }
     } else {
         info!("SC8815 configured successfully for OTG mode");
     }
@@ -142,6 +162,16 @@ async fn main(_spawner: Spawner) {
     info!("Enabling OTG mode...");
     if let Err(e) = sc8815.set_otg_mode(true).await {
         error!("Failed to enable OTG mode: {:?}", e);
+
+        // SAFETY: Immediately disable SC8815 by pulling PSTOP high
+        error!("SAFETY: Disabling SC8815 due to OTG mode configuration failure");
+        pstop.set_high(); // Disable SC8815 chip for safety
+
+        // Blink LED rapidly to indicate OTG mode error
+        loop {
+            led.toggle();
+            Timer::after(Duration::from_millis(250)).await;
+        }
     } else {
         info!("OTG mode enabled successfully");
     }
@@ -149,6 +179,16 @@ async fn main(_spawner: Spawner) {
     // Enable ADC conversion
     if let Err(e) = sc8815.set_adc_conversion(true).await {
         error!("Failed to start ADC conversion: {:?}", e);
+
+        // SAFETY: Immediately disable SC8815 by pulling PSTOP high
+        error!("SAFETY: Disabling SC8815 due to ADC configuration failure");
+        pstop.set_high(); // Disable SC8815 chip for safety
+
+        // Blink LED rapidly to indicate ADC error
+        loop {
+            led.toggle();
+            Timer::after(Duration::from_millis(250)).await;
+        }
     } else {
         info!("ADC conversion started");
     }
@@ -178,6 +218,16 @@ async fn main(_spawner: Spawner) {
                 Timer::after(Duration::from_millis(100)).await; // Wait for chip to stabilize
                 if let Err(e) = sc8815.set_otg_mode(true).await {
                     error!("Failed to enable OTG mode: {:?}", e);
+
+                    // SAFETY: If we can't configure OTG mode, disable SC8815 for safety
+                    error!("SAFETY: Disabling SC8815 due to OTG mode configuration failure");
+                    pstop.set_high(); // Disable SC8815 chip for safety
+
+                    // Blink LED rapidly to indicate communication error
+                    loop {
+                        led.toggle();
+                        Timer::after(Duration::from_millis(250)).await;
+                    }
                 } else {
                     info!("OTG mode enabled - 19V output active");
                 }
@@ -210,6 +260,16 @@ async fn main(_spawner: Spawner) {
                         info!("Re-enabling OTG mode");
                         if let Err(e) = sc8815.set_otg_mode(true).await {
                             error!("Failed to enable OTG mode: {:?}", e);
+
+                            // SAFETY: If we can't configure OTG mode, disable SC8815 for safety
+                            error!("SAFETY: Disabling SC8815 due to OTG mode re-enable failure");
+                            pstop.set_high(); // Disable SC8815 chip for safety
+
+                            // Blink LED rapidly to indicate communication error
+                            loop {
+                                led.toggle();
+                                Timer::after(Duration::from_millis(250)).await;
+                            }
                         }
                     }
                 } else {
@@ -237,7 +297,16 @@ async fn main(_spawner: Spawner) {
             }
             Err(e) => {
                 error!("Failed to read device status: {:?}", e);
-                continue;
+
+                // SAFETY: If we can't communicate with SC8815, disable it for safety
+                error!("SAFETY: Disabling SC8815 due to status read failure");
+                pstop.set_high(); // Disable SC8815 chip for safety
+
+                // Blink LED rapidly to indicate communication error
+                loop {
+                    led.toggle();
+                    Timer::after(Duration::from_millis(250)).await;
+                }
             }
         };
 
@@ -269,6 +338,16 @@ async fn main(_spawner: Spawner) {
                     info!("OTG mode disabled - re-enabling");
                     if let Err(e) = sc8815.set_otg_mode(true).await {
                         error!("Failed to re-enable OTG mode: {:?}", e);
+
+                        // SAFETY: If we can't configure OTG mode, disable SC8815 for safety
+                        error!("SAFETY: Disabling SC8815 due to OTG mode re-enable failure");
+                        pstop.set_high(); // Disable SC8815 chip for safety
+
+                        // Blink LED rapidly to indicate communication error
+                        loop {
+                            led.toggle();
+                            Timer::after(Duration::from_millis(250)).await;
+                        }
                     }
                 } else {
                     // LED pattern: fast blink when providing power, slow blink when idle
@@ -284,7 +363,19 @@ async fn main(_spawner: Spawner) {
                     }
                 }
             },
-            Err(e) => error!("Failed to check OTG mode: {:?}", e),
+            Err(e) => {
+                error!("Failed to check OTG mode: {:?}", e);
+
+                // SAFETY: If we can't communicate with SC8815, disable it for safety
+                error!("SAFETY: Disabling SC8815 due to OTG mode check failure");
+                pstop.set_high(); // Disable SC8815 chip for safety
+
+                // Blink LED rapidly to indicate communication error
+                loop {
+                    led.toggle();
+                    Timer::after(Duration::from_millis(250)).await;
+                }
+            },
         }
         } else {
             // OTG is disabled - just blink LED slowly to show we're alive
