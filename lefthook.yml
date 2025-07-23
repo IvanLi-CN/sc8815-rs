@@ -8,3 +8,8 @@ pre-commit:
     clippy:
       glob: "*.{rs}"
       run: cargo clippy -- -D warnings
+
+commit-msg:
+  commands:
+    conventional_commits:
+      run: bun x commitlint --edit {1}
