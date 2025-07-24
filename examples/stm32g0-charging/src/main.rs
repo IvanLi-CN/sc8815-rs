@@ -43,9 +43,11 @@ async fn main(_spawner: Spawner) {
     // Configure LED for status indication on PB8 (Low = On, High = Off)
     let mut led = Output::new(p.PB8, Level::High, Speed::Low); // Start with LED off
 
-    // Configure PSTOP pin on PB5 but keep SC8815 disabled initially
-    // IMPORTANT: PSTOP must be enabled (pulled low) AFTER hardware configuration is complete
-    let mut pstop = Output::new(p.PB5, Level::High, Speed::Low); // Start with SC8815 disabled (High = disabled)
+    // Configure PSTOP pin on PB5 - CRITICAL SAFETY CONTROL
+    // PSTOP = HIGH: Standby mode (power blocks disabled, I2C active) - SAFE for configuration
+    // PSTOP = LOW: Active mode (power blocks enabled) - ONLY after complete configuration
+    // IMPORTANT: SC8815 default factory configuration may cause hardware damage!
+    let mut pstop = Output::new(p.PB5, Level::High, Speed::Low); // Start in SAFE standby mode
 
     // Configure I2C1 (PB6: SCL, PB7: SDA) - Changed from PB8/PB9 since PB8 is now used for LED
     let mut i2c_config = Config::default();
@@ -66,30 +68,25 @@ async fn main(_spawner: Spawner) {
 
     info!("Starting SC8815 initialization...");
     info!("I2C address: 0x{:02X}", DEFAULT_ADDRESS);
+    info!("PSTOP is HIGH - SC8815 in SAFE standby mode for configuration");
 
     // Add a small delay before first I2C communication
     Timer::after(Duration::from_millis(100)).await;
-    info!("Attempting to read status register...");
+    info!("Testing I2C communication while in standby mode...");
 
-    // First, enable SC8815 by pulling PSTOP low after I2C is ready
-    info!("Enabling SC8815 (pulling PSTOP low)...");
-    pstop.set_low(); // Enable SC8815 chip
-    Timer::after(Duration::from_millis(10)).await; // Give SC8815 time to start up
-
-    // Create SC8815 driver and test communication using proper driver API
+    // Create SC8815 driver and test communication in standby mode
     let mut sc8815_driver = SC8815::new(i2c, DEFAULT_ADDRESS);
-    info!("Testing I2C communication with SC8815 using driver API...");
 
     match sc8815_driver.read_register(sc8815::registers::Register::Status).await {
         Ok(status) => {
-            info!("I2C communication successful, status register: 0x{:02X}", status);
+            info!("I2C communication successful in standby mode, status: 0x{:02X}", status);
         }
         Err(e) => {
             error!("I2C communication failed: {:?}", e);
 
-            // SAFETY: Immediately disable SC8815 by pulling PSTOP high
-            error!("SAFETY: Disabling SC8815 due to I2C communication failure");
-            pstop.set_high(); // Disable SC8815 chip for safety
+            // SAFETY: PSTOP already HIGH (standby mode) - keep it that way
+            error!("SAFETY: Keeping SC8815 in standby mode due to I2C failure");
+            // pstop is already high, no need to change it
 
             // If driver communication fails, perform I2C scan for diagnostics
             info!("Performing I2C scan to detect devices...");
@@ -118,13 +115,12 @@ async fn main(_spawner: Spawner) {
         }
     }
 
-    info!("Initializing SC8815...");
+    info!("Initializing SC8815 in standby mode...");
     if let Err(e) = sc8815_driver.init().await {
         error!("Failed to initialize SC8815: {:?}", e);
 
-        // SAFETY: Immediately disable SC8815 by pulling PSTOP high
-        error!("SAFETY: Disabling SC8815 due to initialization failure");
-        pstop.set_high(); // Disable SC8815 chip for safety
+        // SAFETY: PSTOP already HIGH (standby mode) - keep it that way
+        error!("SAFETY: Keeping SC8815 in standby mode due to initialization failure");
 
         // Blink LED slowly to indicate init error
         loop {
@@ -132,7 +128,7 @@ async fn main(_spawner: Spawner) {
             Timer::after(Duration::from_millis(500)).await;
         }
     }
-    info!("SC8815 initialized successfully");
+    info!("SC8815 initialized successfully in standby mode");
 
     // Configure the device for Charger mode - 4S LiFePO4 charging with 1A limit
     let mut config = DeviceConfiguration::default();
@@ -159,13 +155,12 @@ async fn main(_spawner: Spawner) {
     config.charging_termination = true;
     config.use_ibus_for_charging = false; // Use IBAT (battery side) for charging current
 
-    info!("Configuring SC8815 for Charger mode (4S LiFePO4, 1A charging)...");
+    info!("Configuring SC8815 for Charger mode (4S LiFePO4, 1A charging) in standby mode...");
     if let Err(e) = sc8815_driver.configure_device(&config).await {
         error!("Failed to configure SC8815: {:?}", e);
 
-        // SAFETY: Immediately disable SC8815 by pulling PSTOP high
-        error!("SAFETY: Disabling SC8815 due to configuration failure");
-        pstop.set_high(); // Disable SC8815 chip for safety
+        // SAFETY: PSTOP already HIGH (standby mode) - keep it that way
+        error!("SAFETY: Keeping SC8815 in standby mode due to configuration failure");
 
         // Blink LED rapidly to indicate configuration error
         loop {
@@ -173,16 +168,15 @@ async fn main(_spawner: Spawner) {
             Timer::after(Duration::from_millis(250)).await;
         }
     }
-    info!("SC8815 configured successfully for Charger mode");
+    info!("SC8815 configured successfully for Charger mode in standby mode");
 
-    // Enable charging mode (disable OTG mode)
-    info!("Enabling charging mode...");
+    // Enable charging mode (disable OTG mode) while in standby
+    info!("Configuring charging mode in standby...");
     if let Err(e) = sc8815_driver.set_otg_mode(false).await {
-        error!("Failed to enable charging mode: {:?}", e);
+        error!("Failed to configure charging mode: {:?}", e);
 
-        // SAFETY: Immediately disable SC8815 by pulling PSTOP high
-        error!("SAFETY: Disabling SC8815 due to charging mode configuration failure");
-        pstop.set_high(); // Disable SC8815 chip for safety
+        // SAFETY: PSTOP already HIGH (standby mode) - keep it that way
+        error!("SAFETY: Keeping SC8815 in standby mode due to charging mode configuration failure");
 
         // Blink LED rapidly to indicate charging mode error
         loop {
@@ -190,15 +184,14 @@ async fn main(_spawner: Spawner) {
             Timer::after(Duration::from_millis(250)).await;
         }
     }
-    info!("Charging mode enabled successfully");
+    info!("Charging mode configured successfully in standby");
 
-    // Enable ADC conversion
+    // Enable ADC conversion while in standby
     if let Err(e) = sc8815_driver.set_adc_conversion(true).await {
-        error!("Failed to start ADC conversion: {:?}", e);
+        error!("Failed to configure ADC conversion: {:?}", e);
 
-        // SAFETY: Immediately disable SC8815 by pulling PSTOP high
-        error!("SAFETY: Disabling SC8815 due to ADC configuration failure");
-        pstop.set_high(); // Disable SC8815 chip for safety
+        // SAFETY: PSTOP already HIGH (standby mode) - keep it that way
+        error!("SAFETY: Keeping SC8815 in standby mode due to ADC configuration failure");
 
         // Blink LED rapidly to indicate ADC error
         loop {
@@ -206,11 +199,16 @@ async fn main(_spawner: Spawner) {
             Timer::after(Duration::from_millis(250)).await;
         }
     }
-    info!("ADC conversion started");
+    info!("ADC conversion configured in standby mode");
 
-    // All configuration completed successfully - indicate success with solid LED
+    // All configuration completed successfully in standby mode
+    // NOW it's safe to enable the power blocks
+    info!("🔧 Configuration complete - NOW enabling power blocks (PSTOP LOW)");
+    Timer::after(Duration::from_millis(10_000)).await; // Wait for power blocks to stabilize
+    pstop.set_low(); // Enable power blocks - CRITICAL TIMING!
+
     led.set_low(); // Turn on LED to indicate complete success
-    info!("✅ SC8815 fully configured and ready for operation!");
+    info!("✅ SC8815 fully configured and power blocks ENABLED!");
 
     info!("SC8815 configured as battery charger: 17.8V, 1A charging current");
     info!("Battery voltage limit: 17.8V (4.45V per cell)");
@@ -223,6 +221,9 @@ async fn main(_spawner: Spawner) {
 
     // Main monitoring loop
     loop {
+        // PSTOP status
+        info!("PSTOP is {}", if pstop.is_set_low() { "LOW (active mode)" } else { "HIGH (standby mode)" });
+
         // Read basic device status
         let status = match sc8815_driver.get_device_status().await {
             Ok(status) => {
@@ -261,9 +262,9 @@ async fn main(_spawner: Spawner) {
             Err(e) => {
                 error!("Failed to read device status: {:?}", e);
 
-                // SAFETY: If we can't communicate with SC8815, disable it for safety
-                error!("SAFETY: Disabling SC8815 due to status read failure");
-                pstop.set_high(); // Disable SC8815 chip for safety
+                // SAFETY: If we can't communicate with SC8815, disable power blocks immediately
+                error!("SAFETY: Disabling SC8815 power blocks due to communication failure");
+                pstop.set_high(); // Disable power blocks for safety (standby mode)
 
                 // Blink LED rapidly to indicate communication error
                 loop {

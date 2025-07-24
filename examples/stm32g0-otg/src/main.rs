@@ -42,8 +42,11 @@ async fn main(_spawner: Spawner) {
     // Configure LED for status indication on PB8
     let mut led = Output::new(p.PB8, Level::High, Speed::Low);
 
-    // Configure PSTOP pin on PB5 (Low = Enable, High = Disable)
-    let mut pstop = Output::new(p.PB5, Level::Low, Speed::Low); // Start with SC8815 enabled
+    // Configure PSTOP pin on PB5 - CRITICAL SAFETY CONTROL
+    // PSTOP = HIGH: Standby mode (power blocks disabled, I2C active) - SAFE for configuration
+    // PSTOP = LOW: Active mode (power blocks enabled) - ONLY after complete configuration
+    // IMPORTANT: SC8815 default factory configuration may cause hardware damage!
+    let mut pstop = Output::new(p.PB5, Level::High, Speed::Low); // Start in SAFE standby mode
 
     // Configure I2C1 (PB6: SCL, PB7: SDA) - Changed from PB8/PB9 since PB8 is now used for LED
     let mut i2c_config = Config::default();
@@ -64,20 +67,21 @@ async fn main(_spawner: Spawner) {
 
     info!("Starting SC8815 initialization...");
     info!("I2C address: 0x{:02X}", DEFAULT_ADDRESS);
+    info!("PSTOP is HIGH - SC8815 in SAFE standby mode for configuration");
 
-    // Try to communicate with SC8815 at the expected address
+    // Try to communicate with SC8815 in standby mode
     let mut sc8815 = SC8815::new(i2c, DEFAULT_ADDRESS);
-    info!("Testing I2C communication with SC8815 at 0x{:02X}...", DEFAULT_ADDRESS);
+    info!("Testing I2C communication with SC8815 in standby mode...");
     match sc8815.read_register(sc8815::registers::Register::Status).await {
         Ok(status) => {
-            info!("I2C communication successful, status register: 0x{:02X}", status);
+            info!("I2C communication successful in standby mode, status: 0x{:02X}", status);
         }
         Err(e) => {
             error!("I2C communication failed: {:?}", e);
 
-            // SAFETY: Immediately disable SC8815 by pulling PSTOP high
-            error!("SAFETY: Disabling SC8815 due to I2C communication failure");
-            pstop.set_high(); // Disable SC8815 chip for safety
+            // SAFETY: PSTOP already HIGH (standby mode) - keep it that way
+            error!("SAFETY: Keeping SC8815 in standby mode due to I2C failure");
+            // pstop is already high, no need to change it
 
             // Blink LED slowly to indicate I2C error with SC8815
             loop {
@@ -87,18 +91,16 @@ async fn main(_spawner: Spawner) {
         }
     }
 
-    info!("Initializing SC8815...");
+    info!("Initializing SC8815 in standby mode...");
     match sc8815.init().await {
         Ok(()) => {
-            info!("SC8815 initialized successfully");
-            led.set_low(); // Turn on LED to indicate success
+            info!("SC8815 initialized successfully in standby mode");
         }
         Err(e) => {
             error!("Failed to initialize SC8815: {:?}", e);
 
-            // SAFETY: Immediately disable SC8815 by pulling PSTOP high
-            error!("SAFETY: Disabling SC8815 due to initialization failure");
-            pstop.set_high(); // Disable SC8815 chip for safety
+            // SAFETY: PSTOP already HIGH (standby mode) - keep it that way
+            error!("SAFETY: Keeping SC8815 in standby mode due to initialization failure");
 
             // Blink LED slowly to indicate init error
             loop {
@@ -141,13 +143,12 @@ async fn main(_spawner: Spawner) {
         info!("Short circuit foldback disabled for startup");
     }
 
-    info!("Configuring SC8815 for OTG mode (19V output, 1.5A limit)...");
+    info!("Configuring SC8815 for OTG mode (19V output, 1.5A limit) in standby...");
     if let Err(e) = sc8815.configure_device(&config).await {
         error!("Failed to configure SC8815: {:?}", e);
 
-        // SAFETY: Immediately disable SC8815 by pulling PSTOP high
-        error!("SAFETY: Disabling SC8815 due to configuration failure");
-        pstop.set_high(); // Disable SC8815 chip for safety
+        // SAFETY: PSTOP already HIGH (standby mode) - keep it that way
+        error!("SAFETY: Keeping SC8815 in standby mode due to configuration failure");
 
         // Blink LED rapidly to indicate configuration error
         loop {
@@ -155,17 +156,16 @@ async fn main(_spawner: Spawner) {
             Timer::after(Duration::from_millis(250)).await;
         }
     } else {
-        info!("SC8815 configured successfully for OTG mode");
+        info!("SC8815 configured successfully for OTG mode in standby");
     }
 
-    // Explicitly enable OTG mode
-    info!("Enabling OTG mode...");
+    // Configure OTG mode while in standby
+    info!("Configuring OTG mode in standby...");
     if let Err(e) = sc8815.set_otg_mode(true).await {
-        error!("Failed to enable OTG mode: {:?}", e);
+        error!("Failed to configure OTG mode: {:?}", e);
 
-        // SAFETY: Immediately disable SC8815 by pulling PSTOP high
-        error!("SAFETY: Disabling SC8815 due to OTG mode configuration failure");
-        pstop.set_high(); // Disable SC8815 chip for safety
+        // SAFETY: PSTOP already HIGH (standby mode) - keep it that way
+        error!("SAFETY: Keeping SC8815 in standby mode due to OTG mode configuration failure");
 
         // Blink LED rapidly to indicate OTG mode error
         loop {
@@ -173,16 +173,15 @@ async fn main(_spawner: Spawner) {
             Timer::after(Duration::from_millis(250)).await;
         }
     } else {
-        info!("OTG mode enabled successfully");
+        info!("OTG mode configured successfully in standby");
     }
 
-    // Enable ADC conversion
+    // Enable ADC conversion while in standby
     if let Err(e) = sc8815.set_adc_conversion(true).await {
-        error!("Failed to start ADC conversion: {:?}", e);
+        error!("Failed to configure ADC conversion: {:?}", e);
 
-        // SAFETY: Immediately disable SC8815 by pulling PSTOP high
-        error!("SAFETY: Disabling SC8815 due to ADC configuration failure");
-        pstop.set_high(); // Disable SC8815 chip for safety
+        // SAFETY: PSTOP already HIGH (standby mode) - keep it that way
+        error!("SAFETY: Keeping SC8815 in standby mode due to ADC configuration failure");
 
         // Blink LED rapidly to indicate ADC error
         loop {
@@ -190,15 +189,21 @@ async fn main(_spawner: Spawner) {
             Timer::after(Duration::from_millis(250)).await;
         }
     } else {
-        info!("ADC conversion started");
+        info!("ADC conversion configured in standby mode");
     }
 
-    info!("SC8815 configured as power bank: 19V output, 1.5A current limit");
+    // All configuration completed successfully in standby mode
+    // NOW it's safe to enable the power blocks
+    info!("🔧 Configuration complete - NOW enabling power blocks (PSTOP LOW)");
+    pstop.set_low(); // Enable power blocks - CRITICAL TIMING!
+    Timer::after(Duration::from_millis(10)).await; // Wait for power blocks to stabilize
+
+    info!("✅ SC8815 configured as power bank: 19V output, 1.5A current limit");
     info!("Connect USB load to start power delivery");
-    info!("OTG output will toggle every 10 seconds using PSTOP pin");
+    info!("OTG output will toggle every 10 seconds using OTG mode control");
 
     // Variables for OTG toggle control
-    let mut otg_enabled = true; // Start with OTG enabled
+    let mut otg_enabled = true; // Start with OTG enabled (already configured)
     let mut last_toggle_time = embassy_time::Instant::now();
     let toggle_interval = Duration::from_secs(10);
 
@@ -211,17 +216,13 @@ async fn main(_spawner: Spawner) {
             last_toggle_time = current_time;
 
             if otg_enabled {
-                info!("=== ENABLING OTG OUTPUT (PSTOP = LOW) ===");
-                pstop.set_low(); // Enable SC8815 (PSTOP = Low)
-
-                // Re-enable OTG mode after enabling the chip
-                Timer::after(Duration::from_millis(100)).await; // Wait for chip to stabilize
+                info!("=== ENABLING OTG OUTPUT ===");
                 if let Err(e) = sc8815.set_otg_mode(true).await {
                     error!("Failed to enable OTG mode: {:?}", e);
 
-                    // SAFETY: If we can't configure OTG mode, disable SC8815 for safety
-                    error!("SAFETY: Disabling SC8815 due to OTG mode configuration failure");
-                    pstop.set_high(); // Disable SC8815 chip for safety
+                    // SAFETY: If we can't communicate, disable power blocks for safety
+                    error!("SAFETY: Disabling SC8815 power blocks due to communication failure");
+                    pstop.set_high(); // Disable power blocks for safety
 
                     // Blink LED rapidly to indicate communication error
                     loop {
@@ -232,15 +233,21 @@ async fn main(_spawner: Spawner) {
                     info!("OTG mode enabled - 19V output active");
                 }
             } else {
-                info!("=== DISABLING OTG OUTPUT (PSTOP = HIGH) ===");
-                pstop.set_high(); // Disable SC8815 (PSTOP = High)
-                info!("SC8815 disabled - No output");
+                info!("=== DISABLING OTG OUTPUT ===");
+                if let Err(e) = sc8815.set_otg_mode(false).await {
+                    error!("Failed to disable OTG mode: {:?}", e);
+
+                    // SAFETY: If we can't communicate, disable power blocks for safety
+                    error!("SAFETY: Disabling SC8815 power blocks due to communication failure");
+                    pstop.set_high(); // Disable power blocks for safety
+                } else {
+                    info!("OTG mode disabled - No output");
+                }
             }
         }
-        // Only check device status when OTG is enabled
-        if otg_enabled {
-            // Read basic device status
-            let status = match sc8815.get_device_status().await {
+        // Always check device status for monitoring and safety
+        // Read basic device status
+        let status = match sc8815.get_device_status().await {
             Ok(status) => {
                 if status.ac_adapter_connected {
                     info!("AC adapter connected - Warning: OTG mode is active");
@@ -261,9 +268,9 @@ async fn main(_spawner: Spawner) {
                         if let Err(e) = sc8815.set_otg_mode(true).await {
                             error!("Failed to enable OTG mode: {:?}", e);
 
-                            // SAFETY: If we can't configure OTG mode, disable SC8815 for safety
-                            error!("SAFETY: Disabling SC8815 due to OTG mode re-enable failure");
-                            pstop.set_high(); // Disable SC8815 chip for safety
+                            // SAFETY: If we can't configure OTG mode, disable power blocks for safety
+                            error!("SAFETY: Disabling SC8815 power blocks due to OTG mode re-enable failure");
+                            pstop.set_high(); // Disable power blocks for safety
 
                             // Blink LED rapidly to indicate communication error
                             loop {
@@ -366,9 +373,9 @@ async fn main(_spawner: Spawner) {
             Err(e) => {
                 error!("Failed to check OTG mode: {:?}", e);
 
-                // SAFETY: If we can't communicate with SC8815, disable it for safety
-                error!("SAFETY: Disabling SC8815 due to OTG mode check failure");
-                pstop.set_high(); // Disable SC8815 chip for safety
+                // SAFETY: If we can't communicate with SC8815, disable power blocks for safety
+                error!("SAFETY: Disabling SC8815 power blocks due to communication failure");
+                pstop.set_high(); // Disable power blocks for safety
 
                 // Blink LED rapidly to indicate communication error
                 loop {
@@ -376,12 +383,7 @@ async fn main(_spawner: Spawner) {
                     Timer::after(Duration::from_millis(250)).await;
                 }
             },
-        }
-        } else {
-            // OTG is disabled - just blink LED slowly to show we're alive
-            led.toggle();
-            info!("OTG disabled - SC8815 is in standby mode");
-        }
+        };
 
         info!("----------------------------");
 
