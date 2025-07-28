@@ -2,13 +2,20 @@
 #![no_main]
 
 // SC8815 STM32G031C8U6 Charger Mode Example
-// Configured for 4S LiFePO4 battery charging with 1A current limit
+// Configured for 4S Li-ion battery charging with 1A current limit
 // This example demonstrates using SC8815 in charging mode
+//
+// ⚠️ IMPORTANT: Using external resistor configuration mode
+// Charging voltage is set by external resistor divider, NOT internal registers!
+// External resistors: R_UP=130kΩ, R_DOWN=10kΩ → Charging voltage=16.8V
+//
 // Hardware configuration:
 // - MCU: STM32G031C8U6 (Cortex-M0+)
 // - LED: PB8
 // - I2C: PB6 (SCL), PB7 (SDA)
-// - Battery: 4S LiFePO4 (4.55V per cell, 18.2V total)
+// - PSTOP: PB5
+// - Battery: 4S Li-ion (4.2V per cell, 16.8V total)
+// - External resistors: R_UP=130kΩ, R_DOWN=10kΩ (connected to VBATS)
 // - Current sense resistors: 5mΩ
 // - Switching frequency: 450kHz
 // - Dead time: 60ns
@@ -38,7 +45,7 @@ bind_interrupts!(struct Irqs {
 async fn main(_spawner: Spawner) {
     let p = embassy_stm32::init(Default::default());
     info!("SC8815 STM32G0 Charger Mode Example Starting");
-    info!("Configuration: 4S LiFePO4, 1A charging current limit, 450kHz switching");
+    info!("Configuration: 4S Li-ion, 1A charging current limit, 450kHz switching");
 
     // Configure LED for status indication on PB8 (Low = On, High = Off)
     let mut led = Output::new(p.PB8, Level::High, Speed::Low); // Start with LED off
@@ -130,13 +137,15 @@ async fn main(_spawner: Spawner) {
     }
     info!("SC8815 initialized successfully in standby mode");
 
-    // Configure the device for Charger mode - 4S LiFePO4 charging with 1A limit
+    // Configure the device for Charger mode - 4S Li-ion charging with 1A limit
     let mut config = DeviceConfiguration::default();
 
-    // Configure for 4S LiFePO4 battery using internal voltage setting
+    // Configure for 4S Li-ion battery using external voltage setting (resistor divider)
+    // ⚠️ IMPORTANT: Actual charging voltage is determined by external resistor divider, NOT this setting!
+    // External resistors: R_UP=130kΩ, R_DOWN=10kΩ → VBAT=16.8V
     config.battery.cell_count = CellCount::Cells4S;
-    config.battery.voltage_per_cell = VoltagePerCell::Mv4450;
-    config.battery.use_internal_setting = true;
+    config.battery.voltage_per_cell = VoltagePerCell::Mv4200; // Only used for ADC calculations
+    config.battery.use_internal_setting = false; // Use external resistor configuration
 
     // Configure current limits with 5mΩ sense resistors
     config.current_limits.rs1_mohm = 5;
@@ -169,6 +178,8 @@ async fn main(_spawner: Spawner) {
         }
     }
     info!("SC8815 configured successfully for Charger mode in standby mode");
+
+
 
     // Enable charging mode (disable OTG mode) while in standby
     info!("Configuring charging mode in standby...");
@@ -203,15 +214,15 @@ async fn main(_spawner: Spawner) {
 
     // All configuration completed successfully in standby mode
     // NOW it's safe to enable the power blocks
-    info!("🔧 Configuration complete - NOW enabling power blocks (PSTOP LOW)");
-    Timer::after(Duration::from_millis(10_000)).await; // Wait for power blocks to stabilize
-    pstop.set_low(); // Enable power blocks - CRITICAL TIMING!
+    info!("Configuration complete - enabling power blocks");
+    Timer::after(Duration::from_millis(100)).await; // Brief delay before enabling
+    pstop.set_low(); // Enable power blocks
 
     led.set_low(); // Turn on LED to indicate complete success
-    info!("✅ SC8815 fully configured and power blocks ENABLED!");
+    info!("SC8815 configured and operational");
 
-    info!("SC8815 configured as battery charger: 17.8V, 1A charging current");
-    info!("Battery voltage limit: 17.8V (4.45V per cell)");
+    info!("SC8815 configured as battery charger: 16.8V, 1A charging current");
+    info!("Battery voltage limit: 16.8V (4.2V per cell)");
     info!("VINREG voltage: 11.5V");
     info!("Connect AC adapter to start charging");
 
@@ -221,8 +232,6 @@ async fn main(_spawner: Spawner) {
 
     // Main monitoring loop
     loop {
-        // PSTOP status
-        info!("PSTOP is {}", if pstop.is_set_low() { "LOW (active mode)" } else { "HIGH (standby mode)" });
 
         // Read basic device status
         let status = match sc8815_driver.get_device_status().await {
@@ -284,11 +293,7 @@ async fn main(_spawner: Spawner) {
                 info!("  IBAT: {}mA", measurements.ibat_ma);
                 info!("  ADIN: {}mV", measurements.adin_mv);
 
-                // Debug: Read raw IBUS registers for troubleshooting using optimized consecutive read
-                if let Ok((ibus_high, ibus_low)) = sc8815_driver.read_consecutive_registers(sc8815::registers::Register::IbusValue).await {
-                    let ibus_value2 = (ibus_low >> 6) & 0x03;
-                    info!("Raw IBUS registers: IBUS_VALUE={}, IBUS_VALUE2={}", ibus_high, ibus_value2);
-                }
+
             }
             Err(e) => error!("Failed to read ADC measurements: {:?}", e),
         }
@@ -341,9 +346,7 @@ async fn main(_spawner: Spawner) {
             }
         }
 
-        info!("----------------------------");
-
-        // Short delay for main loop - LED timing is handled separately
-        Timer::after(Duration::from_millis(100)).await;
+        // Update every second
+        Timer::after(Duration::from_secs(1)).await;
     }
 }

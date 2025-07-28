@@ -283,6 +283,8 @@ pub enum VoltagePerCell {
     Mv4100 = 4100,
     /// 4.2V per cell (4200mV) - Standard Li-ion.
     Mv4200 = 4200,
+    /// 4.25V per cell (4250mV).
+    Mv4250 = 4250,
     /// 4.3V per cell (4300mV).
     Mv4300 = 4300,
     /// 4.35V per cell (4350mV) - High voltage Li-ion.
@@ -310,6 +312,7 @@ impl From<u16> for VoltagePerCell {
         match value {
             4100 => Self::Mv4100,
             4200 => Self::Mv4200,
+            4250 => Self::Mv4250,
             4300 => Self::Mv4300,
             4350 => Self::Mv4350,
             4400 => Self::Mv4400,

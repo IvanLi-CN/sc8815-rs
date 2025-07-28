@@ -1364,6 +1364,7 @@ where
         let vcell_setting = match voltage_per_cell {
             crate::VoltagePerCell::Mv4100 => 0b000,
             crate::VoltagePerCell::Mv4200 => 0b001,
+            crate::VoltagePerCell::Mv4250 => 0b010,
             crate::VoltagePerCell::Mv4300 => 0b011,
             crate::VoltagePerCell::Mv4350 => 0b100,
             crate::VoltagePerCell::Mv4400 => 0b101,
@@ -1394,6 +1395,7 @@ where
             * match voltage_per_cell {
                 crate::VoltagePerCell::Mv4100 => 4100,
                 crate::VoltagePerCell::Mv4200 => 4200,
+                crate::VoltagePerCell::Mv4250 => 4250,
                 crate::VoltagePerCell::Mv4300 => 4300,
                 crate::VoltagePerCell::Mv4350 => 4350,
                 crate::VoltagePerCell::Mv4400 => 4400,

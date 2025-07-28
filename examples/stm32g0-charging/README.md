@@ -8,18 +8,60 @@ This example demonstrates using the SC8815 battery management IC in charging mod
 - **LED**: PB8 (Active Low)
 - **I2C**: PB6 (SCL), PB7 (SDA)
 - **PSTOP**: PB5 (Low = Enable, High = Disable)
-- **Battery**: 4S LiFePO4 (4.45V per cell, 17.8V total)
+- **Battery**: 4S Li-ion (charging voltage set to 16.8V by external resistors)
 - **Current sense resistors**: 5mΩ
 - **Switching frequency**: 450kHz
 - **Dead time**: 60ns
+- **⚠️ External resistor divider**: Must be connected to VBATS pin (R_UP=130kΩ, R_DOWN=10kΩ)
 
 ## Battery Configuration
 
+⚠️ **IMPORTANT: External Resistor Configuration Mode**
+
+This example uses **external resistor divider** to set battery charging voltage, NOT the SC8815 internal register settings.
+
 - **Cell count**: 4S (4 cells in series)
-- **Cell voltage**: 4.45V per cell (LiFePO4)
-- **Total voltage**: 17.8V
+- **Charging voltage**: 16.8V (set by external resistors)
+- **Voltage setting**: **External resistor divider** (VBAT_SEL = 1)
 - **Charging current limit**: 1A
 - **VINREG voltage**: 11.5V
+
+### External Resistor Configuration Requirements
+
+**External resistor divider must be connected to VBATS pin:**
+
+```
+VBAT ----[R_UP]----+----[R_DOWN]---- GND
+                    |
+                 VBATS (SC8815)
+```
+
+**Resistor calculation formula:**
+```
+VBAT = VBATS_REF × (1 + R_UP/R_DOWN)
+```
+
+Where VBATS_REF = 1.2V
+
+**For 16.8V charging voltage:**
+- R_UP/R_DOWN ratio = (16.8V/1.2V) - 1 = 13
+- Recommended values: R_UP = 130kΩ, R_DOWN = 10kΩ
+
+### Important Notes
+
+1. **Actual charging voltage is completely determined by external resistors**, not by voltage settings in code
+2. The `VoltagePerCell` setting in code is only used for ADC calculations and display
+3. To change charging voltage, external resistor values must be modified
+4. VBAT_SEL register bit is set to 1, enabling external resistor configuration mode
+
+### Resistor Values for Different Charging Voltages
+
+| Charging Voltage | R_UP | R_DOWN | Ratio |
+|------------------|------|--------|-------|
+| 12.6V | 95kΩ | 10kΩ | 9.5:1 |
+| 16.8V | 130kΩ | 10kΩ | 13:1 |
+| 21.0V | 165kΩ | 10kΩ | 16.5:1 |
+| 25.2V | 200kΩ | 10kΩ | 20:1 |
 
 ## LED Status Indicators
 
