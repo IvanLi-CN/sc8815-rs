@@ -1389,20 +1389,25 @@ where
 
         self.write_register(Register::VbatSet, vbat_set).await?;
 
-        // Set VBAT monitor ratio based on expected battery voltage
-        // For higher voltages (>10.24V), use 12.5x ratio; for lower voltages, use 5x ratio
-        let total_voltage_mv = cell_count as u16
-            * match voltage_per_cell {
-                crate::VoltagePerCell::Mv4100 => 4100,
-                crate::VoltagePerCell::Mv4200 => 4200,
-                crate::VoltagePerCell::Mv4250 => 4250,
-                crate::VoltagePerCell::Mv4300 => 4300,
-                crate::VoltagePerCell::Mv4350 => 4350,
-                crate::VoltagePerCell::Mv4400 => 4400,
-                crate::VoltagePerCell::Mv4450 => 4450,
-            };
-
-        let vbat_mon_ratio = if total_voltage_mv > 10240 { 0 } else { 1 }; // 0: 12.5x, 1: 5x
+        // Set VBAT monitor ratio based on voltage setting mode
+        let vbat_mon_ratio = if use_internal {
+            // Internal mode: use cell_count and voltage_per_cell to determine ratio
+            let total_voltage_mv = cell_count as u16
+                * match voltage_per_cell {
+                    crate::VoltagePerCell::Mv4100 => 4100,
+                    crate::VoltagePerCell::Mv4200 => 4200,
+                    crate::VoltagePerCell::Mv4250 => 4250,
+                    crate::VoltagePerCell::Mv4300 => 4300,
+                    crate::VoltagePerCell::Mv4350 => 4350,
+                    crate::VoltagePerCell::Mv4400 => 4400,
+                    crate::VoltagePerCell::Mv4450 => 4450,
+                };
+            if total_voltage_mv > 10240 { 0 } else { 1 } // 0: 12.5x, 1: 5x
+        } else {
+            // External mode: default to 12.5x ratio for most battery applications
+            // This can be overridden later if needed via set_vbat_monitor_ratio()
+            0 // 12.5x ratio
+        };
 
         // Set VBAT monitor ratio in RATIO register
         let mut ratio_reg = self.read_register(Register::Ratio).await?;
@@ -1415,6 +1420,35 @@ where
 
         // Update internal ADC configuration
         self.adc_config.vbat_mon_ratio = vbat_mon_ratio;
+
+        Ok(())
+    }
+
+    /// Set VBAT monitor ratio manually (useful for external voltage setting mode).
+    ///
+    /// # Arguments
+    ///
+    /// * `ratio` - Monitor ratio setting (0: 12.5x for >10.24V, 1: 5x for ≤10.24V)
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` on success, or an `Error` if the operation fails.
+    pub async fn set_vbat_monitor_ratio(&mut self, ratio: u8) -> Result<(), Error<I2C::Error>> {
+        if ratio > 1 {
+            return Err(Error::InvalidParameter);
+        }
+
+        // Set VBAT monitor ratio in RATIO register
+        let mut ratio_reg = self.read_register(Register::Ratio).await?;
+        if ratio == 1 {
+            ratio_reg |= 0x02; // Set VBAT_MON_RATIO bit for 5x
+        } else {
+            ratio_reg &= !0x02; // Clear VBAT_MON_RATIO bit for 12.5x
+        }
+        self.write_register(Register::Ratio, ratio_reg).await?;
+
+        // Update internal ADC configuration
+        self.adc_config.vbat_mon_ratio = ratio;
 
         Ok(())
     }
