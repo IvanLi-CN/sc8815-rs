@@ -2,12 +2,12 @@
 #![no_main]
 
 // SC8815 STM32G0 OTG Mode Example
-// Configured for 19V output voltage with 1.5A current limit
+// Configured for 12V output voltage with 1.5A current limit
 // This example demonstrates using SC8815 in reverse discharge (OTG) mode
 // Hardware configuration:
 // - LED: PB8
 // - I2C: PB6 (SCL), PB7 (SDA)
-// - Battery: 4S LiFePO4 (4.5V per cell)
+// - Battery: 4S Li-ion (4.2V per cell)
 // - Current sense resistors: 5mΩ
 // - Switching frequency: 450kHz
 // - Dead time: 80ns
@@ -37,7 +37,7 @@ bind_interrupts!(struct Irqs {
 async fn main(_spawner: Spawner) {
     let p = embassy_stm32::init(Default::default());
     info!("SC8815 STM32G0 OTG Mode Example Starting");
-    info!("Configuration: 4S LiFePO4, 19V output, 1.5A current limit, 450kHz switching");
+    info!("Configuration: 4S Li-ion, 12V output, 1.5A current limit, 450kHz switching");
 
     // Configure LED for status indication on PB8
     let mut led = Output::new(p.PB8, Level::High, Speed::Low);
@@ -113,9 +113,9 @@ async fn main(_spawner: Spawner) {
     // Configure the device for OTG (reverse discharge) mode - 19V output, 1.5A limit
     let mut config = DeviceConfiguration::default();
 
-    // Configure for 4S LiFePO4 battery using internal voltage setting
+    // Configure for 4S Li-ion battery using internal voltage setting
     config.battery.cell_count = CellCount::Cells4S;
-    config.battery.voltage_per_cell = VoltagePerCell::Mv4450;
+    config.battery.voltage_per_cell = VoltagePerCell::Mv4200;
     config.battery.use_internal_setting = true;
 
     // Configure current limits with 5mΩ sense resistors
@@ -128,7 +128,7 @@ async fn main(_spawner: Spawner) {
     config.power.operating_mode = OperatingMode::OTG;
     config.power.switching_frequency = SwitchingFrequency::Freq450kHz;
     config.power.dead_time = DeadTime::Ns80;
-    config.power.vinreg_voltage_mv = 19000;
+    config.power.vinreg_voltage_mv = 12000;
 
     // OTG mode settings
     config.trickle_charging = false;
@@ -143,7 +143,7 @@ async fn main(_spawner: Spawner) {
         info!("Short circuit foldback disabled for startup");
     }
 
-    info!("Configuring SC8815 for OTG mode (19V output, 1.5A limit) in standby...");
+    info!("Configuring SC8815 for OTG mode (12V output, 1.5A limit) in standby...");
     if let Err(e) = sc8815.configure_device(&config).await {
         error!("Failed to configure SC8815: {:?}", e);
 
@@ -176,6 +176,23 @@ async fn main(_spawner: Spawner) {
         info!("OTG mode configured successfully in standby");
     }
 
+    // Set VBUS output voltage to 12V for OTG mode
+    info!("Setting VBUS output voltage to 12V...");
+    if let Err(e) = sc8815.set_vbus_internal_voltage(12000, 0).await {
+        error!("Failed to set VBUS voltage: {:?}", e);
+
+        // SAFETY: PSTOP already HIGH (standby mode) - keep it that way
+        error!("SAFETY: Keeping SC8815 in standby mode due to VBUS voltage setting failure");
+
+        // Blink LED rapidly to indicate VBUS voltage error
+        loop {
+            led.toggle();
+            Timer::after(Duration::from_millis(250)).await;
+        }
+    } else {
+        info!("VBUS voltage set to 12V successfully");
+    }
+
     // Enable ADC conversion while in standby
     if let Err(e) = sc8815.set_adc_conversion(true).await {
         error!("Failed to configure ADC conversion: {:?}", e);
@@ -198,7 +215,7 @@ async fn main(_spawner: Spawner) {
     pstop.set_low(); // Enable power blocks - CRITICAL TIMING!
     Timer::after(Duration::from_millis(10)).await; // Wait for power blocks to stabilize
 
-    info!("✅ SC8815 configured as power bank: 19V output, 1.5A current limit");
+    info!("✅ SC8815 configured as power bank: 12V output, 1.5A current limit");
     info!("Connect USB load to start power delivery");
     info!("OTG output will toggle every 10 seconds using OTG mode control");
 
@@ -230,7 +247,7 @@ async fn main(_spawner: Spawner) {
                         Timer::after(Duration::from_millis(250)).await;
                     }
                 } else {
-                    info!("OTG mode enabled - 19V output active");
+                    info!("OTG mode enabled - 12V output active");
                 }
             } else {
                 info!("=== DISABLING OTG OUTPUT ===");
@@ -260,7 +277,7 @@ async fn main(_spawner: Spawner) {
 
                 // Check if USB load is detected (power is being drawn)
                 if status.usb_load_detected {
-                    info!("USB load detected - Providing 19V output power");
+                    info!("USB load detected - Providing 12V output power");
 
                     // Ensure OTG mode is enabled
                     if let Ok(false) = sc8815.is_otg_mode().await {
