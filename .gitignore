@@ -2,6 +2,19 @@
 **/target/
 Cargo.lock
 
+# Rust specific files
+**/*.rs.bk
+**/*.pdb
+**/*.exe
+**/*.elf
+**/*.bin
+**/*.hex
+**/*.map
+**/*.d
+**/*.rlib
+**/*.rmeta
+**/*.rustc_info.json
+
 # IDE files
 .vscode/
 .idea/
