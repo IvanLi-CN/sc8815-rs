@@ -29,12 +29,12 @@ async fn main(_spawner: Spawner) {
     let p = embassy_stm32::init(Default::default());
     info!("SC8815 STM32G474RE Example Starting");
 
-    // Configure LED for status indication (PB8)
-    let mut led = Output::new(p.PB8, Level::High, Speed::Low);
+    // Configure LED for status indication (PC13 - onboard LED for STM32G474RE)
+    let mut led = Output::new(p.PC13, Level::High, Speed::Low);
 
-    // Configure I2C pins
-    let scl = p.PB6;  // I2C1_SCL
-    let sda = p.PB7;  // I2C1_SDA
+    // Configure I2C pins - Use PB8/PB9 for STM32G474RE
+    let scl = p.PB8;  // I2C1_SCL
+    let sda = p.PB9;  // I2C1_SDA
 
     let mut i2c_config = Config::default();
     // Enable internal pull-ups for I2C lines
@@ -118,7 +118,7 @@ async fn main(_spawner: Spawner) {
     // Main monitoring loop
     loop {
         // Read device status
-        match sc8815.get_basic_status().await {
+        match sc8815.get_device_status().await {
             Ok(status) => {
                 info!("Device Status:");
                 info!("  AC Adapter: {}", if status.ac_adapter_connected { "Connected" } else { "Disconnected" });
@@ -131,7 +131,7 @@ async fn main(_spawner: Spawner) {
         }
 
         // Read ADC measurements
-        match sc8815.get_adc_measurements_with_config(&config.current_limits).await {
+        match sc8815.get_adc_measurements().await {
             Ok(measurements) => {
                 info!("ADC Measurements:");
                 info!("  VBUS: {}mV", measurements.vbus_mv);
@@ -144,9 +144,9 @@ async fn main(_spawner: Spawner) {
         }
 
         // Check if charging is complete
-        match sc8815.is_charging_complete().await {
-            Ok(complete) => {
-                if complete {
+        match sc8815.get_device_status().await {
+            Ok(status) => {
+                if status.eoc {
                     info!("Charging complete!");
                     // Slow blink to indicate charging complete
                     led.set_high();

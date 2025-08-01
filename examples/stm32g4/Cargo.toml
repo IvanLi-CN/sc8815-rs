@@ -11,6 +11,7 @@ embassy-stm32 = { git = "https://github.com/embassy-rs/embassy.git", rev = "94f9
   "memory-x",
   "unstable-pac",
   "exti",
+  "dual-bank",
 ] }
 embassy-embedded-hal = { git = "https://github.com/embassy-rs/embassy.git", rev = "94f9b2707486ca3eade5bf4b237edf3d6aa90f35" }
 embassy-executor = { git = "https://github.com/embassy-rs/embassy.git", rev = "94f9b2707486ca3eade5bf4b237edf3d6aa90f35", features = [
@@ -35,7 +36,6 @@ cortex-m = { version = "0.7.7", features = [
   "critical-section-single-core",
 ] }
 cortex-m-rt = "0.7.5"
-embedded-hal = "1.0.0"
 panic-probe = { version = "1.0.0", features = ["print-defmt"] }
 heapless = { version = "0.8", default-features = false }
 portable-atomic = { version = "1.11.0", features = ["critical-section"] }
