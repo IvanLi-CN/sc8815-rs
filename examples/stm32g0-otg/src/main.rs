@@ -2,7 +2,7 @@
 #![no_main]
 
 // SC8815 STM32G0 OTG Mode Example
-// Configured for 12V output voltage with 1.5A current limit
+// Configured for configurable output voltage and current limits
 // This example demonstrates using SC8815 in reverse discharge (OTG) mode
 // Hardware configuration:
 // - LED: PB8
@@ -29,6 +29,24 @@ use sc8815::{
     registers::constants::DEFAULT_ADDRESS,
 };
 
+// === DEMO CONFIGURATION ===
+// 修改这些常量来配置演示行为
+#[derive(Clone, Copy, PartialEq)]
+enum DemoMode {
+    AlwaysOn,  // 一直输出模式 - OTG始终启用
+    Toggle,    // 切换输出模式 - 定期启用/禁用OTG
+}
+
+const DEMO_MODE: DemoMode = DemoMode::Toggle;  // 修改这里来切换演示模式
+const OUTPUT_VOLTAGE_MV: u16 = 19000;          // 输出电压（毫伏）- 可修改为5000, 9000, 12000, 15000等
+const TOGGLE_INTERVAL_SECS: u64 = 10;         // 切换间隔（秒）- 仅在Toggle模式下有效
+
+// === CURRENT LIMIT CONFIGURATION ===
+const IBUS_LIMIT_MA: u16 = 6000;              // VBUS侧电流限制（毫安）- 输出电流限制
+const IBAT_LIMIT_MA: u16 = 10000;              // VBAT侧电流限制（毫安）- 电池侧电流限制
+const RS1_MOHM: u16 = 5;                      // VBUS侧电流检测电阻（毫欧）
+const RS2_MOHM: u16 = 5;                      // VBAT侧电流检测电阻（毫欧）
+
 bind_interrupts!(struct Irqs {
     I2C1 => i2c::EventInterruptHandler<I2C1>, i2c::ErrorInterruptHandler<I2C1>;
 });
@@ -37,7 +55,12 @@ bind_interrupts!(struct Irqs {
 async fn main(_spawner: Spawner) {
     let p = embassy_stm32::init(Default::default());
     info!("SC8815 STM32G0 OTG Mode Example Starting");
-    info!("Configuration: 4S Li-ion, 12V output, 1.5A current limit, 450kHz switching");
+    match DEMO_MODE {
+        DemoMode::AlwaysOn => info!("Demo Mode: ALWAYS ON - OTG output continuously enabled"),
+        DemoMode::Toggle => info!("Demo Mode: TOGGLE - OTG output switches every {} seconds", TOGGLE_INTERVAL_SECS),
+    }
+    info!("Configuration: 4S Li-ion, {}V output, {}A/{}A current limits, 450kHz switching",
+          OUTPUT_VOLTAGE_MV / 1000, IBUS_LIMIT_MA as f32 / 1000.0, IBAT_LIMIT_MA as f32 / 1000.0);
 
     // Configure LED for status indication on PB8
     let mut led = Output::new(p.PB8, Level::High, Speed::Low);
@@ -110,7 +133,7 @@ async fn main(_spawner: Spawner) {
         }
     }
 
-    // Configure the device for OTG (reverse discharge) mode - 19V output, 1.5A limit
+    // Configure the device for OTG (reverse discharge) mode with configurable limits
     let mut config = DeviceConfiguration::default();
 
     // Configure for 4S Li-ion battery using internal voltage setting
@@ -118,17 +141,17 @@ async fn main(_spawner: Spawner) {
     config.battery.voltage_per_cell = VoltagePerCell::Mv4200;
     config.battery.use_internal_setting = true;
 
-    // Configure current limits with 5mΩ sense resistors
-    config.current_limits.rs1_mohm = 5;
-    config.current_limits.rs2_mohm = 5;
-    config.current_limits.ibus_limit_ma = 1500;
-    config.current_limits.ibat_limit_ma = 2000;
+    // Configure current limits with configurable sense resistors
+    config.current_limits.rs1_mohm = RS1_MOHM;
+    config.current_limits.rs2_mohm = RS2_MOHM;
+    config.current_limits.ibus_limit_ma = IBUS_LIMIT_MA;
+    config.current_limits.ibat_limit_ma = IBAT_LIMIT_MA;
 
     // Configure power settings
     config.power.operating_mode = OperatingMode::OTG;
     config.power.switching_frequency = SwitchingFrequency::Freq450kHz;
     config.power.dead_time = DeadTime::Ns80;
-    config.power.vinreg_voltage_mv = 12000;
+    config.power.vinreg_voltage_mv = OUTPUT_VOLTAGE_MV;
 
     // OTG mode settings
     config.trickle_charging = false;
@@ -143,7 +166,8 @@ async fn main(_spawner: Spawner) {
         info!("Short circuit foldback disabled for startup");
     }
 
-    info!("Configuring SC8815 for OTG mode (12V output, 1.5A limit) in standby...");
+    info!("Configuring SC8815 for OTG mode ({}V output, {}A limit) in standby...",
+          OUTPUT_VOLTAGE_MV / 1000, IBUS_LIMIT_MA as f32 / 1000.0);
     if let Err(e) = sc8815.configure_device(&config).await {
         error!("Failed to configure SC8815: {:?}", e);
 
@@ -176,9 +200,9 @@ async fn main(_spawner: Spawner) {
         info!("OTG mode configured successfully in standby");
     }
 
-    // Set VBUS output voltage to 12V for OTG mode
-    info!("Setting VBUS output voltage to 12V...");
-    if let Err(e) = sc8815.set_vbus_internal_voltage(12000, 0).await {
+    // Set VBUS output voltage for OTG mode
+    info!("Setting VBUS output voltage to {}V...", OUTPUT_VOLTAGE_MV / 1000);
+    if let Err(e) = sc8815.set_vbus_internal_voltage(OUTPUT_VOLTAGE_MV, 0).await {
         error!("Failed to set VBUS voltage: {:?}", e);
 
         // SAFETY: PSTOP already HIGH (standby mode) - keep it that way
@@ -190,7 +214,7 @@ async fn main(_spawner: Spawner) {
             Timer::after(Duration::from_millis(250)).await;
         }
     } else {
-        info!("VBUS voltage set to 12V successfully");
+        info!("VBUS voltage set to {}V successfully", OUTPUT_VOLTAGE_MV / 1000);
     }
 
     // Enable ADC conversion while in standby
@@ -215,50 +239,56 @@ async fn main(_spawner: Spawner) {
     pstop.set_low(); // Enable power blocks - CRITICAL TIMING!
     Timer::after(Duration::from_millis(10)).await; // Wait for power blocks to stabilize
 
-    info!("✅ SC8815 configured as power bank: 12V output, 1.5A current limit");
+    info!("✅ SC8815 configured as power bank: {}V output, {}A/{}A current limits",
+          OUTPUT_VOLTAGE_MV / 1000, IBUS_LIMIT_MA as f32 / 1000.0, IBAT_LIMIT_MA as f32 / 1000.0);
     info!("Connect USB load to start power delivery");
-    info!("OTG output will toggle every 10 seconds using OTG mode control");
+    match DEMO_MODE {
+        DemoMode::AlwaysOn => info!("Demo Mode: OTG output will remain continuously enabled"),
+        DemoMode::Toggle => info!("Demo Mode: OTG output will toggle every {} seconds", TOGGLE_INTERVAL_SECS),
+    }
 
     // Variables for OTG toggle control
     let mut otg_enabled = true; // Start with OTG enabled (already configured)
     let mut last_toggle_time = embassy_time::Instant::now();
-    let toggle_interval = Duration::from_secs(10);
+    let toggle_interval = Duration::from_secs(TOGGLE_INTERVAL_SECS);
 
     // Main monitoring loop
     loop {
-        // Check if it's time to toggle OTG state
-        let current_time = embassy_time::Instant::now();
-        if current_time.duration_since(last_toggle_time) >= toggle_interval {
-            otg_enabled = !otg_enabled;
-            last_toggle_time = current_time;
+        // Check if it's time to toggle OTG state (only in Toggle mode)
+        if DEMO_MODE == DemoMode::Toggle {
+            let current_time = embassy_time::Instant::now();
+            if current_time.duration_since(last_toggle_time) >= toggle_interval {
+                otg_enabled = !otg_enabled;
+                last_toggle_time = current_time;
 
-            if otg_enabled {
-                info!("=== ENABLING OTG OUTPUT ===");
-                if let Err(e) = sc8815.set_otg_mode(true).await {
-                    error!("Failed to enable OTG mode: {:?}", e);
+                if otg_enabled {
+                    info!("=== ENABLING OTG OUTPUT ===");
+                    if let Err(e) = sc8815.set_otg_mode(true).await {
+                        error!("Failed to enable OTG mode: {:?}", e);
 
-                    // SAFETY: If we can't communicate, disable power blocks for safety
-                    error!("SAFETY: Disabling SC8815 power blocks due to communication failure");
-                    pstop.set_high(); // Disable power blocks for safety
+                        // SAFETY: If we can't communicate, disable power blocks for safety
+                        error!("SAFETY: Disabling SC8815 power blocks due to communication failure");
+                        pstop.set_high(); // Disable power blocks for safety
 
-                    // Blink LED rapidly to indicate communication error
-                    loop {
-                        led.toggle();
-                        Timer::after(Duration::from_millis(250)).await;
+                        // Blink LED rapidly to indicate communication error
+                        loop {
+                            led.toggle();
+                            Timer::after(Duration::from_millis(250)).await;
+                        }
+                    } else {
+                        info!("OTG mode enabled - {}V output active", OUTPUT_VOLTAGE_MV / 1000);
                     }
                 } else {
-                    info!("OTG mode enabled - 12V output active");
-                }
-            } else {
-                info!("=== DISABLING OTG OUTPUT ===");
-                if let Err(e) = sc8815.set_otg_mode(false).await {
-                    error!("Failed to disable OTG mode: {:?}", e);
+                    info!("=== DISABLING OTG OUTPUT ===");
+                    if let Err(e) = sc8815.set_otg_mode(false).await {
+                        error!("Failed to disable OTG mode: {:?}", e);
 
-                    // SAFETY: If we can't communicate, disable power blocks for safety
-                    error!("SAFETY: Disabling SC8815 power blocks due to communication failure");
-                    pstop.set_high(); // Disable power blocks for safety
-                } else {
-                    info!("OTG mode disabled - No output");
+                        // SAFETY: If we can't communicate, disable power blocks for safety
+                        error!("SAFETY: Disabling SC8815 power blocks due to communication failure");
+                        pstop.set_high(); // Disable power blocks for safety
+                    } else {
+                        info!("OTG mode disabled - No output");
+                    }
                 }
             }
         }
@@ -277,23 +307,33 @@ async fn main(_spawner: Spawner) {
 
                 // Check if USB load is detected (power is being drawn)
                 if status.usb_load_detected {
-                    info!("USB load detected - Providing 12V output power");
+                    info!("USB load detected - Providing {}V output power", OUTPUT_VOLTAGE_MV / 1000);
 
-                    // Ensure OTG mode is enabled
+                    // Ensure OTG mode is enabled (but respect demo mode and toggle state)
                     if let Ok(false) = sc8815.is_otg_mode().await {
-                        info!("Re-enabling OTG mode");
-                        if let Err(e) = sc8815.set_otg_mode(true).await {
-                            error!("Failed to enable OTG mode: {:?}", e);
+                        // Only re-enable if we're in AlwaysOn mode or (Toggle mode and otg_enabled is true)
+                        let should_enable = match DEMO_MODE {
+                            DemoMode::AlwaysOn => true,
+                            DemoMode::Toggle => otg_enabled,
+                        };
 
-                            // SAFETY: If we can't configure OTG mode, disable power blocks for safety
-                            error!("SAFETY: Disabling SC8815 power blocks due to OTG mode re-enable failure");
-                            pstop.set_high(); // Disable power blocks for safety
+                        if should_enable {
+                            info!("Re-enabling OTG mode (demo mode allows it)");
+                            if let Err(e) = sc8815.set_otg_mode(true).await {
+                                error!("Failed to enable OTG mode: {:?}", e);
 
-                            // Blink LED rapidly to indicate communication error
-                            loop {
-                                led.toggle();
-                                Timer::after(Duration::from_millis(250)).await;
+                                // SAFETY: If we can't configure OTG mode, disable power blocks for safety
+                                error!("SAFETY: Disabling SC8815 power blocks due to OTG mode re-enable failure");
+                                pstop.set_high(); // Disable power blocks for safety
+
+                                // Blink LED rapidly to indicate communication error
+                                loop {
+                                    led.toggle();
+                                    Timer::after(Duration::from_millis(250)).await;
+                                }
                             }
+                        } else {
+                            info!("OTG mode disabled by toggle logic - not re-enabling");
                         }
                     }
                 } else {
@@ -359,22 +399,34 @@ async fn main(_spawner: Spawner) {
         match sc8815.is_otg_mode().await {
             Ok(is_otg) => {
                 if !is_otg {
-                    info!("OTG mode disabled - re-enabling");
-                    if let Err(e) = sc8815.set_otg_mode(true).await {
-                        error!("Failed to re-enable OTG mode: {:?}", e);
+                    // Only re-enable if we're in AlwaysOn mode or (Toggle mode and otg_enabled is true)
+                    let should_enable = match DEMO_MODE {
+                        DemoMode::AlwaysOn => true,
+                        DemoMode::Toggle => otg_enabled,
+                    };
 
-                        // SAFETY: If we can't configure OTG mode, disable SC8815 for safety
-                        error!("SAFETY: Disabling SC8815 due to OTG mode re-enable failure");
-                        pstop.set_high(); // Disable SC8815 chip for safety
+                    if should_enable {
+                        info!("OTG mode disabled - re-enabling (demo mode allows it)");
+                        if let Err(e) = sc8815.set_otg_mode(true).await {
+                            error!("Failed to re-enable OTG mode: {:?}", e);
 
-                        // Blink LED rapidly to indicate communication error
-                        loop {
-                            led.toggle();
-                            Timer::after(Duration::from_millis(250)).await;
+                            // SAFETY: If we can't configure OTG mode, disable SC8815 for safety
+                            error!("SAFETY: Disabling SC8815 due to OTG mode re-enable failure");
+                            pstop.set_high(); // Disable SC8815 chip for safety
+
+                            // Blink LED rapidly to indicate communication error
+                            loop {
+                                led.toggle();
+                                Timer::after(Duration::from_millis(250)).await;
+                            }
                         }
+                    } else {
+                        // In Toggle mode and otg_enabled is false - this is expected
+                        // LED pattern: slow blink when intentionally disabled
+                        led.toggle();
                     }
                 } else {
-                    // LED pattern: fast blink when providing power, slow blink when idle
+                    // OTG is enabled - LED pattern: fast blink when providing power, slow blink when idle
                     if status.usb_load_detected {
                         // Fast blink when providing power
                         led.toggle();
