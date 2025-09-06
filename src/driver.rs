@@ -5,7 +5,7 @@
 
 use crate::data_types::{
     AdcMeasurements, BatteryStatus, ChargingState, DeviceConfiguration, InputSourceStatus,
-    OperatingMode, SC8815Status, ThermalStatus,
+    OperatingMode, PowerPathStatus, SC8815Status, ThermalStatus,
 };
 use crate::error::Error;
 use crate::registers::{
@@ -676,6 +676,51 @@ where
         }
 
         self.write_register(Register::Ctrl3Set, flags.bits()).await
+    }
+
+    /// Get the current GPO (General Purpose Output) pin status.
+    ///
+    /// # Returns
+    ///
+    /// Returns `true` if GPO is pulling low (6kΩ internal pull-down active),
+    /// `false` if GPO is in high-impedance state (open drain).
+    /// Returns an `Error` if the operation fails.
+    pub async fn get_gpo_status(&mut self) -> Result<bool, Error<I2C::Error>> {
+        let ctrl3 = self.read_register(Register::Ctrl3Set).await?;
+        let flags = Ctrl3Flags::from_bits_truncate(ctrl3);
+        Ok(flags.contains(Ctrl3Flags::GPO_CTRL))
+    }
+
+    /// Get the current CTRL3 register flags.
+    ///
+    /// This function provides access to all control flags in the CTRL3_SET register,
+    /// including GPO control, PGATE control, ADC start, and other power management settings.
+    ///
+    /// # Returns
+    ///
+    /// Returns the current CTRL3 register flags, or an `Error` if the operation fails.
+    pub async fn get_ctrl3_flags(&mut self) -> Result<Ctrl3Flags, Error<I2C::Error>> {
+        let ctrl3 = self.read_register(Register::Ctrl3Set).await?;
+        Ok(Ctrl3Flags::from_bits_truncate(ctrl3))
+    }
+
+    /// Get the current power path management status.
+    ///
+    /// This function returns the status of both GPO and PGATE pins, which are used
+    /// for power path management and external MOSFET control.
+    ///
+    /// # Returns
+    ///
+    /// Returns a `PowerPathStatus` structure containing the current status of
+    /// GPO and PGATE pins, or an `Error` if the operation fails.
+    pub async fn get_power_path_status(&mut self) -> Result<PowerPathStatus, Error<I2C::Error>> {
+        let ctrl3 = self.read_register(Register::Ctrl3Set).await?;
+        let flags = Ctrl3Flags::from_bits_truncate(ctrl3);
+
+        Ok(PowerPathStatus {
+            gpo_enabled: flags.contains(Ctrl3Flags::GPO_CTRL),
+            pgate_enabled: flags.contains(Ctrl3Flags::EN_PGATE),
+        })
     }
 
     /// Start or stop ADC conversion.

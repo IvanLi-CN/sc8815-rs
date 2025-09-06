@@ -222,3 +222,98 @@ mod async_tests {
         i2c.done();
     }
 }
+
+#[cfg(not(feature = "async"))]
+#[test]
+fn test_gpo_control_and_status() {
+    let expectations = [
+        // Initialization sequence
+        I2cTransaction::write_read(DEFAULT_ADDRESS, vec![0x17], vec![0x40]),
+        I2cTransaction::write_read(DEFAULT_ADDRESS, vec![0x0B], vec![0x00]),
+        I2cTransaction::write(DEFAULT_ADDRESS, vec![0x0B, 0x08]),
+        I2cTransaction::write_read(DEFAULT_ADDRESS, vec![0x19], vec![0x00]),
+        I2cTransaction::write(DEFAULT_ADDRESS, vec![0x19, 0x01]),
+        // Read CTRL3 register (GPO_CTRL bit not set)
+        I2cTransaction::write_read(DEFAULT_ADDRESS, vec![0x0C], vec![0x00]),
+        // Set GPO control (enable GPO) - first read current state
+        I2cTransaction::write_read(DEFAULT_ADDRESS, vec![0x0C], vec![0x00]),
+        // Then write with GPO_CTRL bit set
+        I2cTransaction::write(DEFAULT_ADDRESS, vec![0x0C, 0x40]), // GPO_CTRL bit (bit 6)
+        // Read CTRL3 register again (GPO_CTRL bit set)
+        I2cTransaction::write_read(DEFAULT_ADDRESS, vec![0x0C], vec![0x40]),
+        // Read CTRL3 for power path status (GPO_CTRL set, EN_PGATE not set)
+        I2cTransaction::write_read(DEFAULT_ADDRESS, vec![0x0C], vec![0x40]),
+    ];
+    let mut i2c = I2cMock::new(&expectations);
+    let mut sc8815 = SC8815::new(&mut i2c, DEFAULT_ADDRESS);
+
+    sc8815.init().unwrap();
+
+    // Test initial GPO status (should be false/disabled)
+    let gpo_status = sc8815.get_gpo_status().unwrap();
+    assert!(!gpo_status);
+
+    // Enable GPO
+    sc8815.set_gpo_control(true).unwrap();
+
+    // Test GPO status after enabling (should be true/enabled)
+    let gpo_status = sc8815.get_gpo_status().unwrap();
+    assert!(gpo_status);
+
+    // Test power path status
+    let power_path = sc8815.get_power_path_status().unwrap();
+    assert!(power_path.gpo_enabled);
+    assert!(!power_path.pgate_enabled); // PGATE not enabled in this test
+
+    i2c.done();
+}
+
+#[cfg(feature = "async")]
+mod async_gpo_tests {
+    use super::*;
+    use embedded_hal_mock::eh1::i2c::{Mock as I2cMock, Transaction as I2cTransaction};
+
+    #[tokio::test]
+    async fn test_async_gpo_control_and_status() {
+        let expectations = [
+            // Initialization sequence
+            I2cTransaction::write_read(DEFAULT_ADDRESS, vec![0x17], vec![0x40]),
+            I2cTransaction::write_read(DEFAULT_ADDRESS, vec![0x0B], vec![0x00]),
+            I2cTransaction::write(DEFAULT_ADDRESS, vec![0x0B, 0x08]),
+            I2cTransaction::write_read(DEFAULT_ADDRESS, vec![0x19], vec![0x00]),
+            I2cTransaction::write(DEFAULT_ADDRESS, vec![0x19, 0x01]),
+            // Read CTRL3 register (GPO_CTRL bit not set)
+            I2cTransaction::write_read(DEFAULT_ADDRESS, vec![0x0C], vec![0x00]),
+            // Set GPO control (enable GPO) - first read current state
+            I2cTransaction::write_read(DEFAULT_ADDRESS, vec![0x0C], vec![0x00]),
+            // Then write with GPO_CTRL bit set
+            I2cTransaction::write(DEFAULT_ADDRESS, vec![0x0C, 0x40]), // GPO_CTRL bit (bit 6)
+            // Read CTRL3 register again (GPO_CTRL bit set)
+            I2cTransaction::write_read(DEFAULT_ADDRESS, vec![0x0C], vec![0x40]),
+            // Read CTRL3 for power path status (GPO_CTRL set, EN_PGATE not set)
+            I2cTransaction::write_read(DEFAULT_ADDRESS, vec![0x0C], vec![0x40]),
+        ];
+        let mut i2c = I2cMock::new(&expectations);
+        let mut sc8815 = SC8815::new(&mut i2c, DEFAULT_ADDRESS);
+
+        sc8815.init().await.unwrap();
+
+        // Test initial GPO status (should be false/disabled)
+        let gpo_status = sc8815.get_gpo_status().await.unwrap();
+        assert!(!gpo_status);
+
+        // Enable GPO
+        sc8815.set_gpo_control(true).await.unwrap();
+
+        // Test GPO status after enabling (should be true/enabled)
+        let gpo_status = sc8815.get_gpo_status().await.unwrap();
+        assert!(gpo_status);
+
+        // Test power path status
+        let power_path = sc8815.get_power_path_status().await.unwrap();
+        assert!(power_path.gpo_enabled);
+        assert!(!power_path.pgate_enabled); // PGATE not enabled in this test
+
+        i2c.done();
+    }
+}

@@ -131,6 +131,43 @@ where I2C::Error: core::fmt::Debug
 # }
 ```
 
+### GPO (General Purpose Output) Control
+
+The SC8815 provides a GPO pin for external MOSFET control and power path management:
+
+```rust
+use sc8815::{SC8815, PowerPathStatus, registers::constants::DEFAULT_ADDRESS};
+
+fn gpo_example<I2C: embedded_hal::i2c::I2c>(mut i2c: I2C) -> Result<(), sc8815::error::Error<I2C::Error>>
+where I2C::Error: core::fmt::Debug
+{
+    let mut sc8815 = SC8815::new(&mut i2c, DEFAULT_ADDRESS);
+    sc8815.init()?;
+
+    // Enable GPO (pulls GPO pin low with 6kΩ internal resistor)
+    sc8815.set_gpo_control(true)?;
+
+    // Check GPO status
+    let gpo_enabled = sc8815.get_gpo_status()?;
+    println!("GPO enabled: {}", gpo_enabled);
+
+    // Get comprehensive power path status
+    let power_path = sc8815.get_power_path_status()?;
+    println!("GPO enabled: {}", power_path.gpo_enabled);
+    println!("PGATE enabled: {}", power_path.pgate_enabled);
+
+    // Disable GPO (sets GPO pin to high-impedance)
+    sc8815.set_gpo_control(false)?;
+
+    Ok(())
+}
+```
+
+**GPO Pin Behavior:**
+
+- `true`: GPO pin pulls low (6kΩ internal pull-down active)
+- `false`: GPO pin in high-impedance state (open drain)
+
 ## Feature Flags
 
 - `async`: Enables async/await support for non-blocking operations

@@ -596,3 +596,24 @@ pub struct InterruptConfig {
     /// Enable overvoltage protection interrupts.
     pub overvoltage_protection: bool,
 }
+
+/// Power path management status for GPO and PGATE pins.
+///
+/// This structure provides the current status of the power path management
+/// pins on the SC8815, which are used to control external MOSFETs and
+/// isolation switches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub struct PowerPathStatus {
+    /// GPO (General Purpose Output) pin status.
+    ///
+    /// - `true`: GPO is pulling low (internal 6kΩ pull-down active)
+    /// - `false`: GPO is in high-impedance state (open drain)
+    pub gpo_enabled: bool,
+
+    /// PGATE pin status for external PMOS control.
+    ///
+    /// - `true`: PGATE is pulling low to turn on external PMOS (6kΩ pull-down active)
+    /// - `false`: PGATE is pulling high to turn off external PMOS (20kΩ pull-up active)
+    pub pgate_enabled: bool,
+}
