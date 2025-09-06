@@ -295,8 +295,8 @@ where
 
     /// Initialize the SC8815 power management IC.
     ///
-    /// This method performs the initial setup of the SC8815, including chip version verification
-    /// and basic configuration for power management.
+    /// This method performs the initial setup of the SC8815 by verifying I2C communication
+    /// and setting required factory configuration bits.
     ///
     /// # Returns
     ///
@@ -706,7 +706,7 @@ where
     ///
     /// * `limit_ma` - Current limit in milliamps (minimum 300mA)
     /// * `ratio` - IBUS ratio setting (1: 6x, 2: 3x)
-    /// * `rs1_mohm` - Current sense resistor value in milliohms (typically 10mΩ)
+    /// * `rs1_mohm` - Current sense resistor value in milliohms (typically 5-10mΩ)
     ///
     /// # Returns
     ///
@@ -761,7 +761,7 @@ where
     ///
     /// * `limit_ma` - Current limit in milliamps (minimum 300mA)
     /// * `ratio` - IBAT ratio setting (0: 6x, 1: 12x)
-    /// * `rs2_mohm` - Current sense resistor value in milliohms (typically 10mΩ)
+    /// * `rs2_mohm` - Current sense resistor value in milliohms (typically 5-10mΩ)
     ///
     /// # Returns
     ///
@@ -920,7 +920,7 @@ where
     /// # Arguments
     ///
     /// * `ibus_ratio` - IBUS ratio setting (1: 6x, 2: 3x)
-    /// * `rs1_mohm` - Current sense resistor value in milliohms (typically 10mΩ)
+    /// * `rs1_mohm` - Current sense resistor value in milliohms (typically 5-10mΩ)
     ///
     /// # Returns
     ///
@@ -947,7 +947,7 @@ where
     /// # Arguments
     ///
     /// * `ibat_ratio` - IBAT ratio setting (0: 6x, 1: 12x)
-    /// * `rs2_mohm` - Current sense resistor value in milliohms (typically 10mΩ)
+    /// * `rs2_mohm` - Current sense resistor value in milliohms (typically 5-10mΩ)
     ///
     /// # Returns
     ///

@@ -353,6 +353,7 @@ pub mod constants {
     pub const ADC_MAX_VOLTAGE_MV: u16 = 2048; // Maximum ADIN voltage
 
     /// Current sense resistor typical values (in milliohms)
+    /// Note: Common values range from 5-10mΩ depending on application requirements
     pub const TYPICAL_RS1_MOHM: u16 = 10; // VBUS side current sense resistor
     pub const TYPICAL_RS2_MOHM: u16 = 10; // VBAT side current sense resistor
 

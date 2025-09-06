@@ -24,16 +24,16 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-sc8815 = "0.1.0"
+sc8815 = "0.0.0"
 
 # For async support
-sc8815 = { version = "0.1.0", features = ["async"] }
+sc8815 = { version = "0.0.0", features = ["async"] }
 
 # For defmt logging support
-sc8815 = { version = "0.1.0", features = ["defmt"] }
+sc8815 = { version = "0.0.0", features = ["defmt"] }
 
 # For both async and defmt
-sc8815 = { version = "0.1.0", features = ["async", "defmt"] }
+sc8815 = { version = "0.0.0", features = ["async", "defmt"] }
 ```
 
 ## Usage
@@ -236,13 +236,6 @@ This implementation provides comprehensive SC8815 functionality based on the act
 - **Testing**: Unit tests and integration tests with mock I2C
 - **Examples**: Multiple usage examples demonstrating different features
 
-### 🚧 Future Enhancements
-
-- **Hardware-in-the-loop testing**: Testing with actual SC8815 hardware
-- **Advanced charging profiles**: Custom charging algorithms and profiles
-- **Calibration utilities**: ADC calibration and system tuning helpers
-- **Real-world examples**: Complete application examples with hardware setup
-- **Performance optimization**: Further optimization for embedded systems
 
 ## License
 

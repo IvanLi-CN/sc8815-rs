@@ -37,7 +37,7 @@ enum DemoMode {
     Toggle,    // 切换输出模式 - 定期启用/禁用OTG
 }
 
-const DEMO_MODE: DemoMode = DemoMode::Toggle;  // 修改这里来切换演示模式
+const DEMO_MODE: DemoMode = DemoMode::AlwaysOn;  // 修改这里来切换演示模式
 const OUTPUT_VOLTAGE_MV: u16 = 19000;          // 输出电压（毫伏）- 可修改为5000, 9000, 12000, 15000等
 const TOGGLE_INTERVAL_SECS: u64 = 10;         // 切换间隔（秒）- 仅在Toggle模式下有效
 
