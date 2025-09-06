@@ -1317,18 +1317,45 @@ where
 
     /// Set VBUS output voltage for external reference (discharging mode).
     ///
+    /// This configures the external reference voltage used for VBUS voltage regulation
+    /// when FB_SEL is set to 1 (external feedback mode). The output voltage is determined
+    /// by: VBUS = VBUSREF_E × (1 + RUP/RDOWN)
+    ///
+    /// # Hardware Support vs Official Recommendations
+    ///
+    /// * **Hardware range**: 2mV - 2048mV (full register capability)
+    /// * **Official recommended range**: 700mV - 2048mV (per SC8815 datasheet)
+    /// * **Default value**: 1000mV (1V)
+    ///
+    /// The official documentation states: "The default VBUSREF_E is 1V, and recommended
+    /// VBUSREF_E voltage range is from 0.7V to 2.048V." Values below 700mV are supported
+    /// by the hardware but may have reduced stability, precision, or noise immunity.
+    ///
     /// # Arguments
     ///
-    /// * `reference_mv` - External reference voltage in millivolts (700-2048mV)
+    /// * `reference_mv` - External reference voltage in millivolts (2-2048mV)
     ///
     /// # Returns
     ///
     /// Returns `Ok(())` on success, or an `Error` if the operation fails.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// // Set to 1000mV (1V) - recommended default
+    /// driver.set_vbus_external_reference(1000).await?;
+    ///
+    /// // Set to 800mV - within recommended range
+    /// driver.set_vbus_external_reference(800).await?;
+    ///
+    /// // Set to 500mV - hardware supported but below official recommendation
+    /// driver.set_vbus_external_reference(500).await?;
+    /// ```
     pub async fn set_vbus_external_reference(
         &mut self,
         reference_mv: u16,
     ) -> Result<(), Error<I2C::Error>> {
-        if !(700..=2048).contains(&reference_mv) {
+        if !(2..=2048).contains(&reference_mv) {
             return Err(Error::InvalidParameter);
         }
 
