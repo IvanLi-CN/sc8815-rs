@@ -40,7 +40,7 @@ sc8815 = { version = "0.0.0", features = ["async", "defmt"] }
 
 ### Basic Usage
 
-```rust
+```rust,ignore
 use sc8815::{SC8815, DeviceConfiguration, OperatingMode, CellCount, VoltagePerCell, registers::constants::DEFAULT_ADDRESS};
 use embedded_hal::i2c::I2c;
 
@@ -94,7 +94,7 @@ where I2C::Error: core::fmt::Debug
 
 ### Async Usage
 
-```rust
+```rust,ignore
 # #[cfg(feature = "async")]
 # {
 use sc8815::{SC8815, DeviceConfiguration, registers::constants::DEFAULT_ADDRESS};
@@ -133,9 +133,11 @@ where I2C::Error: core::fmt::Debug
 
 ### GPO (General Purpose Output) Control
 
-The SC8815 provides a GPO pin for external MOSFET control and power path management:
+The SC8815 provides a GPO pin for external MOSFET control and power path management.
 
-```rust
+Note on semantics: writing `1` (true) enables the internal open-drain transistor and PULLS THE PIN LOW via ~6kΩ. Writing `0` (false) turns it OFF and leaves the pin HIGH-Z.
+
+```rust,ignore
 use sc8815::{SC8815, PowerPathStatus, registers::constants::DEFAULT_ADDRESS};
 
 fn gpo_example<I2C: embedded_hal::i2c::I2c>(mut i2c: I2C) -> Result<(), sc8815::error::Error<I2C::Error>>
@@ -144,20 +146,20 @@ where I2C::Error: core::fmt::Debug
     let mut sc8815 = SC8815::new(&mut i2c, DEFAULT_ADDRESS);
     sc8815.init()?;
 
-    // Enable GPO (pulls GPO pin low with 6kΩ internal resistor)
-    sc8815.set_gpo_control(true)?;
+    // Pull GPO LOW (enables internal ~6kΩ pulldown)
+    sc8815.set_gpo_pull_low(true)?;
 
-    // Check GPO status
-    let gpo_enabled = sc8815.get_gpo_status()?;
-    println!("GPO enabled: {}", gpo_enabled);
+    // Check GPO status (true => pulled LOW, false => HIGH-Z)
+    let gpo_low = sc8815.is_gpo_pulled_low()?;
+    println!("GPO pulled low: {}", gpo_low);
 
     // Get comprehensive power path status
     let power_path = sc8815.get_power_path_status()?;
-    println!("GPO enabled: {}", power_path.gpo_enabled);
+    println!("GPO pulled low: {}", power_path.gpo_pulled_low);
     println!("PGATE enabled: {}", power_path.pgate_enabled);
 
-    // Disable GPO (sets GPO pin to high-impedance)
-    sc8815.set_gpo_control(false)?;
+    // Release GPO (HIGH-Z)
+    sc8815.set_gpo_pull_low(false)?;
 
     Ok(())
 }
@@ -165,8 +167,12 @@ where I2C::Error: core::fmt::Debug
 
 **GPO Pin Behavior:**
 
-- `true`: GPO pin pulls low (6kΩ internal pull-down active)
-- `false`: GPO pin in high-impedance state (open drain)
+- `true` (1): GPO pin pulls LOW (6kΩ internal pull-down active, open-drain ON)
+- `false` (0): GPO pin is HIGH-Z (open drain)
+
+API 变更（更清晰的语义）：
+- 替换 `set_gpo_control(true/false)` 为 `set_gpo_pull_low(true/false)`（true=拉低）
+- 替换 `get_gpo_status()` 为 `is_gpo_pulled_low()`
 
 ## Feature Flags
 

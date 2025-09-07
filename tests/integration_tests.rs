@@ -249,20 +249,20 @@ fn test_gpo_control_and_status() {
 
     sc8815.init().unwrap();
 
-    // Test initial GPO status (should be false/disabled)
-    let gpo_status = sc8815.get_gpo_status().unwrap();
+    // Test initial GPO status (should be false/high-Z)
+    let gpo_status = sc8815.is_gpo_pulled_low().unwrap();
     assert!(!gpo_status);
 
-    // Enable GPO
-    sc8815.set_gpo_control(true).unwrap();
+    // Pull GPO LOW
+    sc8815.set_gpo_pull_low(true).unwrap();
 
-    // Test GPO status after enabling (should be true/enabled)
-    let gpo_status = sc8815.get_gpo_status().unwrap();
+    // Test GPO status after pulling low (should be true)
+    let gpo_status = sc8815.is_gpo_pulled_low().unwrap();
     assert!(gpo_status);
 
     // Test power path status
     let power_path = sc8815.get_power_path_status().unwrap();
-    assert!(power_path.gpo_enabled);
+    assert!(power_path.gpo_pulled_low);
     assert!(!power_path.pgate_enabled); // PGATE not enabled in this test
 
     i2c.done();
@@ -298,20 +298,20 @@ mod async_gpo_tests {
 
         sc8815.init().await.unwrap();
 
-        // Test initial GPO status (should be false/disabled)
-        let gpo_status = sc8815.get_gpo_status().await.unwrap();
+        // Test initial GPO status (should be false/high-Z)
+        let gpo_status = sc8815.is_gpo_pulled_low().await.unwrap();
         assert!(!gpo_status);
 
-        // Enable GPO
-        sc8815.set_gpo_control(true).await.unwrap();
+        // Pull GPO LOW
+        sc8815.set_gpo_pull_low(true).await.unwrap();
 
-        // Test GPO status after enabling (should be true/enabled)
-        let gpo_status = sc8815.get_gpo_status().await.unwrap();
+        // Test GPO status after pulling low (should be true)
+        let gpo_status = sc8815.is_gpo_pulled_low().await.unwrap();
         assert!(gpo_status);
 
         // Test power path status
         let power_path = sc8815.get_power_path_status().await.unwrap();
-        assert!(power_path.gpo_enabled);
+        assert!(power_path.gpo_pulled_low);
         assert!(!power_path.pgate_enabled); // PGATE not enabled in this test
 
         i2c.done();

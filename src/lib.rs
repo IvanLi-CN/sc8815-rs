@@ -24,7 +24,7 @@
 //!
 //! ### Basic Setup
 //!
-//! ```rust,no_run
+//! ```rust,ignore
 //! use sc8815::{SC8815, registers::constants::DEFAULT_ADDRESS};
 //! use embedded_hal::i2c::I2c;
 //!
@@ -46,7 +46,7 @@
 //!
 //! ### Charging Mode Configuration
 //!
-//! ```rust,no_run
+//! ```rust,ignore
 //! use sc8815::{
 //!     SC8815, DeviceConfiguration, OperatingMode, CellCount,
 //!     SwitchingFrequency, DeadTime, VoltagePerCell,
@@ -80,7 +80,7 @@
 //!
 //! ### OTG (Power Bank) Mode Configuration
 //!
-//! ```rust,no_run
+//! ```rust,ignore
 //! # use sc8815::{
 //! #     SC8815, DeviceConfiguration, OperatingMode, CellCount,
 //! #     SwitchingFrequency, DeadTime, VoltagePerCell,

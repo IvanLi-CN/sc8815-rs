@@ -657,19 +657,15 @@ where
     }
 
     /// Control the GPO (General Purpose Output) pin.
+    /// Explicitly control whether GPO is pulled LOW (open-drain transistor ON).
     ///
-    /// # Arguments
-    ///
-    /// * `enable` - If `true`, GPO outputs logic low. If `false`, GPO is open drain (high impedance).
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(())` on success, or an `Error` if the operation fails.
-    pub async fn set_gpo_control(&mut self, enable: bool) -> Result<(), Error<I2C::Error>> {
+    /// - `true`: Pull GPO LOW via internal ~6kΩ pulldown (open-drain enabled)
+    /// - `false`: Leave GPO HIGH-Z (open drain)
+    pub async fn set_gpo_pull_low(&mut self, pull_low: bool) -> Result<(), Error<I2C::Error>> {
         let ctrl3 = self.read_register(Register::Ctrl3Set).await?;
         let mut flags = Ctrl3Flags::from_bits_truncate(ctrl3);
 
-        if enable {
+        if pull_low {
             flags.insert(Ctrl3Flags::GPO_CTRL);
         } else {
             flags.remove(Ctrl3Flags::GPO_CTRL);
@@ -678,14 +674,11 @@ where
         self.write_register(Register::Ctrl3Set, flags.bits()).await
     }
 
-    /// Get the current GPO (General Purpose Output) pin status.
+    /// Returns whether GPO is currently pulled LOW (open-drain transistor ON).
     ///
-    /// # Returns
-    ///
-    /// Returns `true` if GPO is pulling low (6kΩ internal pull-down active),
-    /// `false` if GPO is in high-impedance state (open drain).
-    /// Returns an `Error` if the operation fails.
-    pub async fn get_gpo_status(&mut self) -> Result<bool, Error<I2C::Error>> {
+    /// - `true`: GPO is LOW (6kΩ pull-down active)
+    /// - `false`: GPO is HIGH-Z (open drain)
+    pub async fn is_gpo_pulled_low(&mut self) -> Result<bool, Error<I2C::Error>> {
         let ctrl3 = self.read_register(Register::Ctrl3Set).await?;
         let flags = Ctrl3Flags::from_bits_truncate(ctrl3);
         Ok(flags.contains(Ctrl3Flags::GPO_CTRL))
@@ -718,7 +711,7 @@ where
         let flags = Ctrl3Flags::from_bits_truncate(ctrl3);
 
         Ok(PowerPathStatus {
-            gpo_enabled: flags.contains(Ctrl3Flags::GPO_CTRL),
+            gpo_pulled_low: flags.contains(Ctrl3Flags::GPO_CTRL),
             pgate_enabled: flags.contains(Ctrl3Flags::EN_PGATE),
         })
     }

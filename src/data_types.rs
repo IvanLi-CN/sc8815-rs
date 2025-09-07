@@ -605,11 +605,11 @@ pub struct InterruptConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct PowerPathStatus {
-    /// GPO (General Purpose Output) pin status.
+    /// GPO (General Purpose Output) pin pull state.
     ///
-    /// - `true`: GPO is pulling low (internal 6kΩ pull-down active)
-    /// - `false`: GPO is in high-impedance state (open drain)
-    pub gpo_enabled: bool,
+    /// - `true`: GPO is pulled LOW (internal ~6kΩ pull-down active)
+    /// - `false`: GPO is HIGH-Z (open drain)
+    pub gpo_pulled_low: bool,
 
     /// PGATE pin status for external PMOS control.
     ///
