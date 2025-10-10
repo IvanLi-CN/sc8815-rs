@@ -4,8 +4,8 @@
 //! This driver provides methods to interact with the SC8815 for power management and charging control.
 
 use crate::data_types::{
-    AdcMeasurements, BatteryStatus, ChargingState, DeviceConfiguration, InputSourceStatus,
-    OperatingMode, PowerPathStatus, SC8815Status, ThermalStatus,
+    AdcMeasurements, BatteryStatus, ChargingState, DeviceConfiguration, FeedbackMode,
+    InputSourceStatus, OperatingMode, PowerPathStatus, SC8815Status, ThermalStatus,
 };
 use crate::error::Error;
 use crate::registers::{
@@ -1379,6 +1379,31 @@ where
         let mut flags = Ctrl1Flags::from_bits_truncate(ctrl1);
         flags.insert(Ctrl1Flags::FB_SEL);
         self.write_register(Register::Ctrl1Set, flags.bits()).await
+    }
+
+    /// Set feedback selection for VBUS regulation in OTG mode.
+    ///
+    /// - FeedbackMode::Internal -> FB_SEL=0 (use internal reference VBUSREF_I)
+    /// - FeedbackMode::External -> FB_SEL=1 (use external feedback via FB pin with VBUSREF_E)
+    pub async fn set_feedback_mode(&mut self, mode: FeedbackMode) -> Result<(), Error<I2C::Error>> {
+        let ctrl1 = self.read_register(Register::Ctrl1Set).await?;
+        let mut flags = Ctrl1Flags::from_bits_truncate(ctrl1);
+        match mode {
+            FeedbackMode::Internal => flags.remove(Ctrl1Flags::FB_SEL),
+            FeedbackMode::External => flags.insert(Ctrl1Flags::FB_SEL),
+        }
+        self.write_register(Register::Ctrl1Set, flags.bits()).await
+    }
+
+    /// Get current feedback selection.
+    pub async fn get_feedback_mode(&mut self) -> Result<FeedbackMode, Error<I2C::Error>> {
+        let ctrl1 = self.read_register(Register::Ctrl1Set).await?;
+        let flags = Ctrl1Flags::from_bits_truncate(ctrl1);
+        Ok(if flags.contains(Ctrl1Flags::FB_SEL) {
+            FeedbackMode::External
+        } else {
+            FeedbackMode::Internal
+        })
     }
 
     /// Set slew rate for VBUS dynamic voltage changes in discharging mode.

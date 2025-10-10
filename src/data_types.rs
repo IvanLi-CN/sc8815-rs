@@ -96,6 +96,16 @@ pub enum PowerState {
     On,
 }
 
+/// Feedback selection for VBUS regulation in OTG mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub enum FeedbackMode {
+    /// Use internal reference registers VBUSREF_I_SET/SET2 (FB_SEL=0 per datasheet)
+    Internal,
+    /// Use external resistor divider at FB pin with external reference VBUSREF_E (FB_SEL=1)
+    External,
+}
+
 /// Represents the charging state of the device.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
