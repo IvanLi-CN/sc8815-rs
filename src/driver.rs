@@ -32,25 +32,19 @@ impl AdcCalculations {
         ((high as u16) << 2) | (((low >> 6) & 0x03) as u16)
     }
 
-    /// Get voltage ratio multiplier for VBUS/VBAT calculations.
-    #[inline]
-    pub fn get_voltage_ratio_multiplier(ratio: u8) -> Option<f32> {
-        match ratio {
-            0 => Some(12.5), // 12.5x ratio
-            1 => Some(5.0),  // 5x ratio
-            _ => None,
-        }
-    }
-
-    /// Calculate voltage from ADC value using the standard formula.
+    /// Calculate voltage from ADC value using integer arithmetic.
     /// Formula: Voltage = (4 * ADC_VALUE + ADC_VALUE2 + 1) * RATIO * 2 mV
+    /// For RATIO={12.5x, 5x} this becomes {25x, 10x} in mV per LSB.
     #[inline]
     pub fn calculate_voltage_mv(high: u8, low: u8, ratio: u8) -> Option<u16> {
-        let ratio_multiplier = Self::get_voltage_ratio_multiplier(ratio)?;
         let adc_value2 = (low >> 6) & 0x03;
-        let voltage_mv =
-            (4 * (high as u32) + (adc_value2 as u32) + 1) as f32 * ratio_multiplier * 2.0;
-        Some(voltage_mv as u16)
+        let val = 4u32 * (high as u32) + (adc_value2 as u32) + 1u32; // up to 1024
+        let mv = match ratio {
+            0 => val * 25, // 12.5x → 25 mV per code
+            1 => val * 10, // 5x    → 10 mV per code
+            _ => return None,
+        };
+        Some(mv as u16)
     }
 
     /// Get current ratio multiplier for IBUS calculations.
@@ -73,16 +67,15 @@ impl AdcCalculations {
         }
     }
 
-    /// Calculate current from ADC value using the SC8815 formula.
-    /// Formula: Current (A) = (4 × ADC_VALUE + ADC_VALUE2 + 1) × 2 × 10mΩ × RATIO / (1200 × RS)
+    /// Calculate current from ADC using fixed-point integer math.
+    /// Current(mA) = ((4*ADC + ADC2 + 1) * RATIO * 50) / (3 * RS_mΩ)
     #[inline]
     pub fn calculate_current_ma(high: u8, low: u8, ratio_multiplier: u8, rs_mohm: u16) -> u16 {
         let adc_value2 = (low >> 6) & 0x03;
-        let adc_combined = 4 * (high as u32) + (adc_value2 as u32) + 1;
-        let numerator = adc_combined * 2 * 10 * (ratio_multiplier as u32);
-        let denominator = 1200 * (rs_mohm as u32);
-        let current_a = numerator as f32 / denominator as f32;
-        (current_a * 1000.0) as u16
+        let val = 4u32 * (high as u32) + (adc_value2 as u32) + 1u32; // ≤1024
+        let num = val * (ratio_multiplier as u32) * 50u32;
+        let den = 3u32 * (rs_mohm as u32);
+        (num / den) as u16 // floor to match previous float→int cast
     }
 
     /// Calculate IBUS current from ADC registers.
@@ -767,15 +760,14 @@ where
             _ => return Err(Error::InvalidParameter),
         };
 
-        let limit_a = limit_ma as f32 / 1000.0;
-        let ibus_lim_set =
-            ((limit_a * 256.0 * rs1_mohm as f32) / (ratio_multiplier as f32 * 10.0)) - 1.0;
-
-        if !(0.0..=255.0).contains(&ibus_lim_set) {
+        // y = floor((limit_ma * 256 * RS) / (1000 * RATIO * 10))
+        let num = (limit_ma as u32) * 256u32 * (rs1_mohm as u32);
+        let den = 1000u32 * (ratio_multiplier as u32) * 10u32;
+        let y = num / den; // floor
+        if y == 0 || y > 256 {
             return Err(Error::InvalidParameter);
         }
-
-        let ibus_lim_set = ibus_lim_set as u8;
+        let ibus_lim_set = (y - 1) as u8;
 
         // Set the IBUS limit register
         self.write_register(Register::IbusLimSet, ibus_lim_set)
@@ -822,15 +814,13 @@ where
             _ => return Err(Error::InvalidParameter),
         };
 
-        let limit_a = limit_ma as f32 / 1000.0;
-        let ibat_lim_set =
-            ((limit_a * 256.0 * rs2_mohm as f32) / (ratio_multiplier as f32 * 10.0)) - 1.0;
-
-        if !(0.0..=255.0).contains(&ibat_lim_set) {
+        let num = (limit_ma as u32) * 256u32 * (rs2_mohm as u32);
+        let den = 1000u32 * (ratio_multiplier as u32) * 10u32;
+        let y = num / den; // floor
+        if y == 0 || y > 256 {
             return Err(Error::InvalidParameter);
         }
-
-        let ibat_lim_set = ibat_lim_set as u8;
+        let ibat_lim_set = (y - 1) as u8;
 
         // Set the IBAT limit register
         self.write_register(Register::IbatLimSet, ibat_lim_set)
@@ -1266,16 +1256,26 @@ where
         // Calculate reference voltage based on formula:
         // VBUS = VBUSREF_I * VBUS_RATIO
         // VBUSREF_I = (4 * VBUSREF_I_SET + VBUSREF_I_SET2 + 1) * 2 mV
-        let ratio_multiplier = AdcCalculations::get_voltage_ratio_multiplier(vbus_ratio)
-            .ok_or(Error::InvalidParameter)?;
-
-        let vbusref_i_mv = voltage_mv as f32 / ratio_multiplier;
-        if !(2.0..=2048.0).contains(&vbusref_i_mv) {
+        // Bounds check in VBUS domain to avoid floats
+        // ratio=0 (12.5x): VBUS in [25, 25600]; ratio=1 (5x): VBUS in [10, 10240]
+        let (min_vbus, max_vbus) = if vbus_ratio == 0 {
+            (25u16, 25600u16)
+        } else {
+            (10u16, 10240u16)
+        };
+        if voltage_mv < min_vbus || voltage_mv > max_vbus {
             return Err(Error::InvalidParameter);
         }
 
-        // Calculate 10-bit reference value
-        let ref_value = ((vbusref_i_mv / 2.0) - 1.0) as u16;
+        // Compute 10‑bit reference code without floats.
+        // ref_value = floor(VBUSREF_I/2 - 1), where VBUSREF_I = VBUS / ratio.
+        let ref_value: u16 = if vbus_ratio == 0 {
+            // ratio=12.5 ⇒ code = floor((VBUS - 25)/25)
+            ((voltage_mv as u32 - 25) / 25) as u16
+        } else {
+            // ratio=5 ⇒ code = floor((VBUS - 10)/10)
+            ((voltage_mv as u32 - 10) / 10) as u16
+        };
         if ref_value > 1023 {
             return Err(Error::InvalidParameter);
         }
@@ -1354,7 +1354,7 @@ where
 
         // Calculate 10-bit reference value
         // VBUSREF_E = (4 * VBUSREF_E_SET + VBUSREF_E_SET2 + 1) * 2 mV
-        let ref_value = ((reference_mv as f32 / 2.0) - 1.0) as u16;
+        let ref_value = ((reference_mv as u32 - 2) / 2) as u16; // floor
         if ref_value > 1023 {
             return Err(Error::InvalidParameter);
         }
