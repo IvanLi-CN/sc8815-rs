@@ -1286,7 +1286,10 @@ where
         // Set the reference voltage registers
         self.write_register(Register::VbusrefISet, vbusref_i_set)
             .await?;
-        self.write_register(Register::VbusrefISet2, (vbusref_i_set2 << 6) | 0x3F)
+        // Preserve low 6 bits; only update [7:6] with our low2 value
+        let set2_old_i = self.read_register(Register::VbusrefISet2).await?;
+        let set2_new_i = (set2_old_i & 0x3F) | ((vbusref_i_set2 & 0x03) << 6);
+        self.write_register(Register::VbusrefISet2, set2_new_i)
             .await?;
 
         // Set VBUS ratio in RATIO register
@@ -1365,7 +1368,10 @@ where
         // Set the external reference voltage registers
         self.write_register(Register::VbusrefESet, vbusref_e_set)
             .await?;
-        self.write_register(Register::VbusrefESet2, (vbusref_e_set2 << 6) | 0x3F)
+        // Preserve low 6 bits; only update [7:6] with our low2 value
+        let set2_old_e = self.read_register(Register::VbusrefESet2).await?;
+        let set2_new_e = (set2_old_e & 0x3F) | ((vbusref_e_set2 & 0x03) << 6);
+        self.write_register(Register::VbusrefESet2, set2_new_e)
             .await?;
 
         // Set FB_SEL to 1 for external reference
