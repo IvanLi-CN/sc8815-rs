@@ -205,7 +205,7 @@ async fn main(_spawner: Spawner) {
 
     // Set VBUS output voltage for OTG mode
     info!("Setting VBUS output voltage to {}V...", OUTPUT_VOLTAGE_MV / 1000);
-    if let Err(e) = sc8815.set_vbus_internal_voltage(OUTPUT_VOLTAGE_MV, 0).await {
+    if let Err(e) = sc8815.set_vbus_internal_voltage(OUTPUT_VOLTAGE_MV).await {
         error!("Failed to set VBUS voltage: {:?}", e);
 
         // SAFETY: PSTOP already HIGH (standby mode) - keep it that way

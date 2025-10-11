@@ -1249,7 +1249,6 @@ where
     /// # Arguments
     ///
     /// * `voltage_mv` - Desired VBUS output voltage in millivolts
-    /// * `vbus_ratio` - VBUS ratio setting (0: 12.5x for >10.24V, 1: 5x for <10.24V)
     ///
     /// # Returns
     ///
@@ -1257,8 +1256,9 @@ where
     pub async fn set_vbus_internal_voltage(
         &mut self,
         voltage_mv: u16,
-        vbus_ratio: u8,
     ) -> Result<(), Error<I2C::Error>> {
+        // Use driver's configured VBUS ratio (programmed during configure_device)
+        let vbus_ratio = self.adc_config.vbus_ratio;
         if vbus_ratio > 1 {
             return Err(Error::InvalidParameter);
         }
@@ -1292,17 +1292,7 @@ where
         self.write_register(Register::VbusrefISet2, set2_new_i)
             .await?;
 
-        // Set VBUS ratio in RATIO register
-        let mut ratio_reg = self.read_register(Register::Ratio).await?;
-        if vbus_ratio == 1 {
-            ratio_reg |= 0x01; // Set VBUS_RATIO bit
-        } else {
-            ratio_reg &= !0x01; // Clear VBUS_RATIO bit
-        }
-        self.write_register(Register::Ratio, ratio_reg).await?;
-
-        // Update internal ADC configuration
-        self.adc_config.vbus_ratio = vbus_ratio;
+        // Do not change VBUS_RATIO here; rely on prior configuration
 
         // Ensure FB_SEL is set to 0 for internal reference
         let ctrl1 = self.read_register(Register::Ctrl1Set).await?;

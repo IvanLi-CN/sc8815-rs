@@ -105,7 +105,7 @@
 //!
 //! sc8815.configure_device(&config)?;
 //! sc8815.set_otg_mode(true)?;
-//! sc8815.set_vbus_internal_voltage(19000, 0)?; // 19V output
+//! sc8815.set_vbus_internal_voltage(19000)?; // 19V output
 //!
 //! // Monitor output
 //! let status = sc8815.get_device_status()?;
