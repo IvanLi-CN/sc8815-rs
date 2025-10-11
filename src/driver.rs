@@ -926,17 +926,12 @@ where
 
     /// Read VBAT voltage from ADC.
     ///
-    /// # Arguments
-    ///
-    /// * `vbat_mon_ratio` - VBAT monitor ratio setting (0: 12.5x, 1: 5x)
-    ///
     /// # Returns
     ///
     /// Returns VBAT voltage in millivolts, or an `Error` if the operation fails.
-    pub async fn read_vbat_voltage(
-        &mut self,
-        vbat_mon_ratio: u8,
-    ) -> Result<u16, Error<I2C::Error>> {
+    pub async fn read_vbat_voltage(&mut self) -> Result<u16, Error<I2C::Error>> {
+        // Use driver's configured VBAT monitor ratio
+        let vbat_mon_ratio = self.adc_config.vbat_mon_ratio;
         if vbat_mon_ratio > 1 {
             return Err(Error::InvalidParameter);
         }
