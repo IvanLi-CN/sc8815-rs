@@ -1755,11 +1755,14 @@ where
         self.set_frequency_dithering(config.power.frequency_dithering)
             .await?;
         self.set_pfm_mode(config.power.pfm_mode).await?;
-        self.set_vinreg_voltage(
-            config.power.vinreg_voltage_mv,
-            config.power.vinreg_ratio.into(),
-        )
-        .await?;
+        // VINREG is only relevant in Charging mode; skip in OTG to honor project policy
+        if config.power.operating_mode == OperatingMode::Charging {
+            self.set_vinreg_voltage(
+                config.power.vinreg_voltage_mv,
+                config.power.vinreg_ratio.into(),
+            )
+            .await?;
+        }
 
         // Apply VBUS ratio (ADC/internal scaling) according to configuration
         let mut ratio_reg = self.read_register(Register::Ratio).await?;
