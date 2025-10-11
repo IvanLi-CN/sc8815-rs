@@ -904,14 +904,12 @@ where
 
     /// Read VBUS voltage from ADC.
     ///
-    /// # Arguments
-    ///
-    /// * `vbus_ratio` - VBUS ratio setting (0: 12.5x, 1: 5x)
-    ///
     /// # Returns
     ///
     /// Returns VBUS voltage in millivolts, or an `Error` if the operation fails.
-    pub async fn read_vbus_voltage(&mut self, vbus_ratio: u8) -> Result<u16, Error<I2C::Error>> {
+    pub async fn read_vbus_voltage(&mut self) -> Result<u16, Error<I2C::Error>> {
+        // Use driver's configured VBUS ratio (set during configure_device)
+        let vbus_ratio = self.adc_config.vbus_ratio;
         if vbus_ratio > 1 {
             return Err(Error::InvalidParameter);
         }
