@@ -1778,6 +1778,16 @@ where
         )
         .await?;
 
+        // Apply VBUS ratio (ADC/internal scaling) according to configuration
+        let mut ratio_reg = self.read_register(Register::Ratio).await?;
+        let vbus_ratio_u8: u8 = config.power.vbus_ratio.into();
+        if vbus_ratio_u8 == 1 {
+            ratio_reg |= 0x01; // set VBUS_RATIO bit for 5x
+        } else {
+            ratio_reg &= !0x01; // clear for 12.5x
+        }
+        self.write_register(Register::Ratio, ratio_reg).await?;
+
         // Configure charging settings
         self.set_trickle_charging(config.trickle_charging).await?;
         self.set_charging_termination(config.charging_termination)
@@ -1787,7 +1797,7 @@ where
 
         // Update ADC configuration in the driver to match the device configuration
         let adc_config = AdcConfiguration {
-            vbus_ratio: 0, // Default to 12.5x ratio (could be read from RATIO register if needed)
+            vbus_ratio: config.power.vbus_ratio.into(),
             vbat_mon_ratio: 0, // Default to 12.5x ratio (could be read from RATIO register if needed)
             ibus_ratio: config.current_limits.ibus_ratio.into(),
             ibat_ratio: config.current_limits.ibat_ratio.into(),
