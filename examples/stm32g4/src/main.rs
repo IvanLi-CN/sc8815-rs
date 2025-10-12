@@ -95,6 +95,8 @@ async fn main(_spawner: Spawner) {
             pfm_mode: false,                  // Disable PFM
             vinreg_voltage_mv: 4500,          // 4.5V VINREG
             vinreg_ratio: VinregRatio::Ratio100x, // 100x ratio
+            // VBUS ratio for ADC/internal reference scaling (0: 12.5x, 1: 5x)
+            vbus_ratio: sc8815::VbusRatio::Ratio12_5x,
         },
         trickle_charging: true,               // Enable trickle charging
         charging_termination: true,           // Enable auto-termination

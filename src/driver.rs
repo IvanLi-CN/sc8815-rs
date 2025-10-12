@@ -4,8 +4,8 @@
 //! This driver provides methods to interact with the SC8815 for power management and charging control.
 
 use crate::data_types::{
-    AdcMeasurements, BatteryStatus, ChargingState, DeviceConfiguration, InputSourceStatus,
-    OperatingMode, PowerPathStatus, SC8815Status, ThermalStatus,
+    AdcMeasurements, BatteryStatus, ChargingState, DeviceConfiguration, FeedbackMode,
+    InputSourceStatus, OperatingMode, PowerPathStatus, SC8815Status, ThermalStatus,
 };
 use crate::error::Error;
 use crate::registers::{
@@ -894,14 +894,12 @@ where
 
     /// Read VBUS voltage from ADC.
     ///
-    /// # Arguments
-    ///
-    /// * `vbus_ratio` - VBUS ratio setting (0: 12.5x, 1: 5x)
-    ///
     /// # Returns
     ///
     /// Returns VBUS voltage in millivolts, or an `Error` if the operation fails.
-    pub async fn read_vbus_voltage(&mut self, vbus_ratio: u8) -> Result<u16, Error<I2C::Error>> {
+    pub async fn read_vbus_voltage(&mut self) -> Result<u16, Error<I2C::Error>> {
+        // Use driver's configured VBUS ratio (set during configure_device)
+        let vbus_ratio = self.adc_config.vbus_ratio;
         if vbus_ratio > 1 {
             return Err(Error::InvalidParameter);
         }
@@ -918,17 +916,12 @@ where
 
     /// Read VBAT voltage from ADC.
     ///
-    /// # Arguments
-    ///
-    /// * `vbat_mon_ratio` - VBAT monitor ratio setting (0: 12.5x, 1: 5x)
-    ///
     /// # Returns
     ///
     /// Returns VBAT voltage in millivolts, or an `Error` if the operation fails.
-    pub async fn read_vbat_voltage(
-        &mut self,
-        vbat_mon_ratio: u8,
-    ) -> Result<u16, Error<I2C::Error>> {
+    pub async fn read_vbat_voltage(&mut self) -> Result<u16, Error<I2C::Error>> {
+        // Use driver's configured VBAT monitor ratio
+        let vbat_mon_ratio = self.adc_config.vbat_mon_ratio;
         if vbat_mon_ratio > 1 {
             return Err(Error::InvalidParameter);
         }
@@ -1239,7 +1232,6 @@ where
     /// # Arguments
     ///
     /// * `voltage_mv` - Desired VBUS output voltage in millivolts
-    /// * `vbus_ratio` - VBUS ratio setting (0: 12.5x for >10.24V, 1: 5x for <10.24V)
     ///
     /// # Returns
     ///
@@ -1247,8 +1239,9 @@ where
     pub async fn set_vbus_internal_voltage(
         &mut self,
         voltage_mv: u16,
-        vbus_ratio: u8,
     ) -> Result<(), Error<I2C::Error>> {
+        // Use driver's configured VBUS ratio (programmed during configure_device)
+        let vbus_ratio = self.adc_config.vbus_ratio;
         if vbus_ratio > 1 {
             return Err(Error::InvalidParameter);
         }
@@ -1286,20 +1279,13 @@ where
         // Set the reference voltage registers
         self.write_register(Register::VbusrefISet, vbusref_i_set)
             .await?;
-        self.write_register(Register::VbusrefISet2, (vbusref_i_set2 << 6) | 0x3F)
+        // Preserve low 6 bits; only update [7:6] with our low2 value
+        let set2_old_i = self.read_register(Register::VbusrefISet2).await?;
+        let set2_new_i = (set2_old_i & 0x3F) | ((vbusref_i_set2 & 0x03) << 6);
+        self.write_register(Register::VbusrefISet2, set2_new_i)
             .await?;
 
-        // Set VBUS ratio in RATIO register
-        let mut ratio_reg = self.read_register(Register::Ratio).await?;
-        if vbus_ratio == 1 {
-            ratio_reg |= 0x01; // Set VBUS_RATIO bit
-        } else {
-            ratio_reg &= !0x01; // Clear VBUS_RATIO bit
-        }
-        self.write_register(Register::Ratio, ratio_reg).await?;
-
-        // Update internal ADC configuration
-        self.adc_config.vbus_ratio = vbus_ratio;
+        // Do not change VBUS_RATIO here; rely on prior configuration
 
         // Ensure FB_SEL is set to 0 for internal reference
         let ctrl1 = self.read_register(Register::Ctrl1Set).await?;
@@ -1365,7 +1351,10 @@ where
         // Set the external reference voltage registers
         self.write_register(Register::VbusrefESet, vbusref_e_set)
             .await?;
-        self.write_register(Register::VbusrefESet2, (vbusref_e_set2 << 6) | 0x3F)
+        // Preserve low 6 bits; only update [7:6] with our low2 value
+        let set2_old_e = self.read_register(Register::VbusrefESet2).await?;
+        let set2_new_e = (set2_old_e & 0x3F) | ((vbusref_e_set2 & 0x03) << 6);
+        self.write_register(Register::VbusrefESet2, set2_new_e)
             .await?;
 
         // Set FB_SEL to 1 for external reference
@@ -1373,6 +1362,31 @@ where
         let mut flags = Ctrl1Flags::from_bits_truncate(ctrl1);
         flags.insert(Ctrl1Flags::FB_SEL);
         self.write_register(Register::Ctrl1Set, flags.bits()).await
+    }
+
+    /// Set feedback selection for VBUS regulation in OTG mode.
+    ///
+    /// - FeedbackMode::Internal -> FB_SEL=0 (use internal reference VBUSREF_I)
+    /// - FeedbackMode::External -> FB_SEL=1 (use external feedback via FB pin with VBUSREF_E)
+    pub async fn set_feedback_mode(&mut self, mode: FeedbackMode) -> Result<(), Error<I2C::Error>> {
+        let ctrl1 = self.read_register(Register::Ctrl1Set).await?;
+        let mut flags = Ctrl1Flags::from_bits_truncate(ctrl1);
+        match mode {
+            FeedbackMode::Internal => flags.remove(Ctrl1Flags::FB_SEL),
+            FeedbackMode::External => flags.insert(Ctrl1Flags::FB_SEL),
+        }
+        self.write_register(Register::Ctrl1Set, flags.bits()).await
+    }
+
+    /// Get current feedback selection.
+    pub async fn get_feedback_mode(&mut self) -> Result<FeedbackMode, Error<I2C::Error>> {
+        let ctrl1 = self.read_register(Register::Ctrl1Set).await?;
+        let flags = Ctrl1Flags::from_bits_truncate(ctrl1);
+        Ok(if flags.contains(Ctrl1Flags::FB_SEL) {
+            FeedbackMode::External
+        } else {
+            FeedbackMode::Internal
+        })
     }
 
     /// Set slew rate for VBUS dynamic voltage changes in discharging mode.
@@ -1741,11 +1755,24 @@ where
         self.set_frequency_dithering(config.power.frequency_dithering)
             .await?;
         self.set_pfm_mode(config.power.pfm_mode).await?;
-        self.set_vinreg_voltage(
-            config.power.vinreg_voltage_mv,
-            config.power.vinreg_ratio.into(),
-        )
-        .await?;
+        // VINREG is only relevant in Charging mode; skip in OTG to honor project policy
+        if config.power.operating_mode == OperatingMode::Charging {
+            self.set_vinreg_voltage(
+                config.power.vinreg_voltage_mv,
+                config.power.vinreg_ratio.into(),
+            )
+            .await?;
+        }
+
+        // Apply VBUS ratio (ADC/internal scaling) according to configuration
+        let mut ratio_reg = self.read_register(Register::Ratio).await?;
+        let vbus_ratio_u8: u8 = config.power.vbus_ratio.into();
+        if vbus_ratio_u8 == 1 {
+            ratio_reg |= 0x01; // set VBUS_RATIO bit for 5x
+        } else {
+            ratio_reg &= !0x01; // clear for 12.5x
+        }
+        self.write_register(Register::Ratio, ratio_reg).await?;
 
         // Configure charging settings
         self.set_trickle_charging(config.trickle_charging).await?;
@@ -1756,7 +1783,7 @@ where
 
         // Update ADC configuration in the driver to match the device configuration
         let adc_config = AdcConfiguration {
-            vbus_ratio: 0, // Default to 12.5x ratio (could be read from RATIO register if needed)
+            vbus_ratio: config.power.vbus_ratio.into(),
             vbat_mon_ratio: 0, // Default to 12.5x ratio (could be read from RATIO register if needed)
             ibus_ratio: config.current_limits.ibus_ratio.into(),
             ibat_ratio: config.current_limits.ibat_ratio.into(),

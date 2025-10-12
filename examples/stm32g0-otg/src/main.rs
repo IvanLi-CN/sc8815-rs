@@ -26,6 +26,7 @@ use {defmt_rtt as _, panic_probe as _};
 
 use sc8815::{
     SC8815, DeviceConfiguration, OperatingMode, CellCount, SwitchingFrequency, DeadTime, VoltagePerCell,
+    IbusRatio,
     registers::constants::DEFAULT_ADDRESS,
 };
 
@@ -42,7 +43,7 @@ const OUTPUT_VOLTAGE_MV: u16 = 19000;          // 输出电压（毫伏）- 可�
 const TOGGLE_INTERVAL_SECS: u64 = 10;         // 切换间隔（秒）- 仅在Toggle模式下有效
 
 // === CURRENT LIMIT CONFIGURATION ===
-const IBUS_LIMIT_MA: u16 = 6000;              // VBUS侧电流限制（毫安）- 输出电流限制
+const IBUS_LIMIT_MA: u16 = 7000;              // VBUS侧电流限制（毫安）- 输出电流限制（提升为 7A）
 const IBAT_LIMIT_MA: u16 = 10000;              // VBAT侧电流限制（毫安）- 电池侧电流限制
 const RS1_MOHM: u16 = 5;                      // VBUS侧电流检测电阻（毫欧）
 const RS2_MOHM: u16 = 5;                      // VBAT侧电流检测电阻（毫欧）
@@ -146,12 +147,15 @@ async fn main(_spawner: Spawner) {
     config.current_limits.rs2_mohm = RS2_MOHM;
     config.current_limits.ibus_limit_ma = IBUS_LIMIT_MA;
     config.current_limits.ibat_limit_ma = IBAT_LIMIT_MA;
+    // 提升 IBUS 比率到 6x，以便支持更高的输出限流
+    config.current_limits.ibus_ratio = IbusRatio::Ratio6x;
 
     // Configure power settings
     config.power.operating_mode = OperatingMode::OTG;
     config.power.switching_frequency = SwitchingFrequency::Freq450kHz;
     config.power.dead_time = DeadTime::Ns80;
-    config.power.vinreg_voltage_mv = OUTPUT_VOLTAGE_MV;
+    // NOTE: VINREG is a charging-mode input regulation threshold and
+    // is intentionally not configured here because OTG ignores VINREG.
 
     // OTG mode settings
     config.trickle_charging = false;
@@ -202,7 +206,7 @@ async fn main(_spawner: Spawner) {
 
     // Set VBUS output voltage for OTG mode
     info!("Setting VBUS output voltage to {}V...", OUTPUT_VOLTAGE_MV / 1000);
-    if let Err(e) = sc8815.set_vbus_internal_voltage(OUTPUT_VOLTAGE_MV, 0).await {
+    if let Err(e) = sc8815.set_vbus_internal_voltage(OUTPUT_VOLTAGE_MV).await {
         error!("Failed to set VBUS voltage: {:?}", e);
 
         // SAFETY: PSTOP already HIGH (standby mode) - keep it that way

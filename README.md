@@ -79,7 +79,7 @@ where I2C::Error: core::fmt::Debug
     sc8815.set_otg_mode(true)?;
 
     // Set VBUS output voltage for discharging (5V)
-    sc8815.set_vbus_internal_voltage(5000, 1)?; // 5000mV, 5x ratio
+    sc8815.set_vbus_internal_voltage(5000)?; // 5000mV
 
     // Read ADC measurements
     let measurements = sc8815.get_adc_measurements()?;

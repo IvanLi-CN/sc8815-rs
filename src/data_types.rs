@@ -96,6 +96,16 @@ pub enum PowerState {
     On,
 }
 
+/// Feedback selection for VBUS regulation in OTG mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub enum FeedbackMode {
+    /// Use internal reference registers VBUSREF_I_SET/SET2 (FB_SEL=0 per datasheet)
+    Internal,
+    /// Use external resistor divider at FB pin with external reference VBUSREF_E (FB_SEL=1)
+    External,
+}
+
 /// Represents the charging state of the device.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
@@ -516,6 +526,8 @@ pub struct PowerConfiguration {
     pub vinreg_voltage_mv: u16,
     /// VINREG ratio setting.
     pub vinreg_ratio: VinregRatio,
+    /// VBUS ratio setting for ADC and internal reference scaling (0: 12.5x, 1: 5x).
+    pub vbus_ratio: VbusRatio,
 }
 
 impl Default for PowerConfiguration {
@@ -528,6 +540,39 @@ impl Default for PowerConfiguration {
             pfm_mode: false,
             vinreg_voltage_mv: 4500,
             vinreg_ratio: VinregRatio::Ratio100x,
+            vbus_ratio: VbusRatio::Ratio12_5x,
+        }
+    }
+}
+
+/// VBUS ratio selection for ADC and internal reference scaling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub enum VbusRatio {
+    /// 12.5x ratio (use for >10.24V range)
+    Ratio12_5x = 0,
+    /// 5x ratio (use for <=10.24V range)
+    Ratio5x = 1,
+}
+
+impl Default for VbusRatio {
+    fn default() -> Self {
+        Self::Ratio12_5x
+    }
+}
+
+impl From<VbusRatio> for u8 {
+    fn from(v: VbusRatio) -> Self {
+        v as u8
+    }
+}
+
+impl From<u8> for VbusRatio {
+    fn from(v: u8) -> Self {
+        if v == 1 {
+            Self::Ratio5x
+        } else {
+            Self::Ratio12_5x
         }
     }
 }

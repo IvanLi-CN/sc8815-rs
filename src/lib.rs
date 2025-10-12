@@ -100,12 +100,13 @@
 //! config.power.operating_mode = OperatingMode::OTG;
 //! config.power.switching_frequency = SwitchingFrequency::Freq450kHz;
 //! config.power.dead_time = DeadTime::Ns80; // Higher dead time for OTG
-//! config.power.vinreg_voltage_mv = 19000; // 19V output
+//! // NOTE: VINREG is for charging mode only and is ignored in OTG.
 //! config.current_limits.ibus_limit_ma = 6000; // 6A output limit
 //!
 //! sc8815.configure_device(&config)?;
 //! sc8815.set_otg_mode(true)?;
-//! sc8815.set_vbus_internal_voltage(19000, 0)?; // 19V output
+//! // Set OTG output voltage via internal VBUS reference
+//! sc8815.set_vbus_internal_voltage(19000)?; // 19V output
 //!
 //! // Monitor output
 //! let status = sc8815.get_device_status()?;
