@@ -23,13 +23,13 @@ This example demonstrates using the SC8815 battery management IC in OTG (On-The-
 ### Current Sensing
 
 - **Sense resistors**: 5mΩ (both RS1 and RS2)
-- **Current limits**:
-  - IBUS: 1.5A (output current limit)
-  - IBAT: 2.0A (battery current limit)
+- **Current limits (example)**:
+  - IBUS: 7A (output current limit)
+  - IBAT: 10A (battery current limit)
 
 ### Power Settings
 
-- **Output voltage**: 19V (VINREG)
+- **Output voltage**: 19V (VBUS internal reference; VINREG applies to charging mode only)
 - **Switching frequency**: 450kHz
 - **Dead time**: 80ns
 
@@ -105,7 +105,7 @@ cargo run --release
 ### Connecting Loads
 
 - Connect USB devices or other 19V loads to the output
-- Maximum current: 1.5A
+- Maximum current (example): 7A
 - System will detect load connection and provide power
 
 ## Safety Considerations

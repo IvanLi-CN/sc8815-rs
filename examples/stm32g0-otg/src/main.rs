@@ -154,7 +154,8 @@ async fn main(_spawner: Spawner) {
     config.power.operating_mode = OperatingMode::OTG;
     config.power.switching_frequency = SwitchingFrequency::Freq450kHz;
     config.power.dead_time = DeadTime::Ns80;
-    config.power.vinreg_voltage_mv = OUTPUT_VOLTAGE_MV;
+    // NOTE: VINREG is a charging-mode input regulation threshold and
+    // is intentionally not configured here because OTG ignores VINREG.
 
     // OTG mode settings
     config.trickle_charging = false;
