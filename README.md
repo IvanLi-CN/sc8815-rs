@@ -135,7 +135,7 @@ where I2C::Error: core::fmt::Debug
 
 The SC8815 provides a GPO pin for external MOSFET control and power path management.
 
-Note on semantics: writing `1` (true) enables the internal open-drain transistor and PULLS THE PIN LOW via ~6kΩ. Writing `0` (false) turns it OFF and leaves the pin HIGH-Z.
+Semantics: writing `true` enables the internal open-drain transistor and pulls the pin LOW via ~6kΩ. Writing `false` turns it off and leaves the pin high-impedance.
 
 ```rust,ignore
 use sc8815::{SC8815, PowerPathStatus, registers::constants::DEFAULT_ADDRESS};
@@ -168,11 +168,7 @@ where I2C::Error: core::fmt::Debug
 **GPO Pin Behavior:**
 
 - `true` (1): GPO pin pulls LOW (6kΩ internal pull-down active, open-drain ON)
-- `false` (0): GPO pin is HIGH-Z (open drain)
-
-API 变更（更清晰的语义）：
-- 替换 `set_gpo_control(true/false)` 为 `set_gpo_pull_low(true/false)`（true=拉低）
-- 替换 `get_gpo_status()` 为 `is_gpo_pulled_low()`
+- `false` (0): GPO pin is high-impedance (open-drain OFF)
 
 ## Feature Flags
 
