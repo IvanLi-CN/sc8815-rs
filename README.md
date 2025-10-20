@@ -131,6 +131,16 @@ where I2C::Error: core::fmt::Debug
 # }
 ```
 
+## Examples
+
+The repository includes ready-to-run firmware targets under the `examples/` directory:
+
+- `examples/stm32g0-charging`: Configures SC8815 for 4S Li-ion charging on STM32G031G8U6 using an external VBAT resistor divider.
+- `examples/stm32g0-otg`: Demonstrates OTG (boost) mode on STM32G031G8U6 with internal VBAT sensing.
+- `examples/stm32g0-sc8815-sw2303`: Drives SC8815 in OTG mode with external feedback regulation while monitoring SW2303; this design keeps `VBATS` tied to `VBAT` and relies on the default 4S configuration.
+
+Each example has its own README and Makefile that describe hardware wiring and provide one-step build/flash commands.
+
 ### GPO (General Purpose Output) Control
 
 The SC8815 provides a GPO pin for external MOSFET control and power path management.
