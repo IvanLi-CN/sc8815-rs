@@ -7,7 +7,7 @@ ROOT_DIR := $(abspath $(CURDIR))
 EX_DIR := examples
 SELECT_PROBE_SCRIPT := $(ROOT_DIR)/scripts/select-probe.sh
 
-EXAMPLES := stm32g0-charging stm32g0-otg stm32g4
+EXAMPLES := stm32g0-charging stm32g0-otg stm32g0-sc8815-sw2303 stm32g4
 
 .PHONY: help select-probe
 
