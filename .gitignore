@@ -25,6 +25,9 @@ Cargo.lock
 .DS_Store
 Thumbs.db
 
+# Local environment overrides
+.env
+
 # Debug files
 debug/
 *.pdb
