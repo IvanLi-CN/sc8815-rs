@@ -3,14 +3,16 @@
 //! SC8815 is a power management IC for battery charging and power delivery.
 //! This driver provides methods to interact with the SC8815 for power management and charging control.
 
-use crate::data_types::{
-    AdcMeasurements, BatteryStatus, ChargingState, DeviceConfiguration, FeedbackMode,
-    InputSourceStatus, OperatingMode, PowerPathStatus, SC8815Status, ThermalStatus,
-};
-use crate::error::Error;
-use crate::registers::{
-    BatteryStatusFlags, Ctrl0Flags, Ctrl1Flags, Ctrl2Flags, Ctrl3Flags, InputSourceStatusFlags,
-    MaskFlags, Register, StatusFlags, ThermalStatusFlags,
+use crate::{
+    data_types::{
+        AdcMeasurements, BatteryStatus, ChargingState, DeviceConfiguration, FeedbackMode,
+        InputSourceStatus, OperatingMode, PowerPathStatus, SC8815Status, ThermalStatus,
+    },
+    error::Error,
+    registers::{
+        BatteryStatusFlags, Ctrl0Flags, Ctrl1Flags, Ctrl2Flags, Ctrl3Flags, InputSourceStatusFlags,
+        MaskFlags, RatioFlags, Register, StatusFlags, ThermalStatusFlags,
+    },
 };
 
 #[cfg(not(feature = "async"))]
@@ -1764,13 +1766,15 @@ where
             .await?;
         }
 
-        // Apply VBUS ratio (ADC/internal scaling) according to configuration
+        // Apply VBUS ratio (ADC/internal scaling) according to configuration,
+        // but preserve any VBAT/IBUS/IBAT ratio bits configured by
+        // `configure_battery_voltage` so ADC math and hardware stay aligned.
         let mut ratio_reg = self.read_register(Register::Ratio).await?;
         let vbus_ratio_u8: u8 = config.power.vbus_ratio.into();
         if vbus_ratio_u8 == 1 {
-            ratio_reg |= 0x01; // set VBUS_RATIO bit for 5x
+            ratio_reg |= RatioFlags::VBUS_RATIO.bits();
         } else {
-            ratio_reg &= !0x01; // clear for 12.5x
+            ratio_reg &= !RatioFlags::VBUS_RATIO.bits();
         }
         self.write_register(Register::Ratio, ratio_reg).await?;
 
@@ -1781,10 +1785,13 @@ where
         self.set_charging_current_selection(!config.use_ibus_for_charging)
             .await?;
 
-        // Update ADC configuration in the driver to match the device configuration
+        // Update ADC configuration in the driver to match the device configuration.
+        // Use the VBAT monitor ratio already chosen by `configure_battery_voltage`
+        // (and stored in self.adc_config) instead of forcing 12.5x here, so that
+        // hardware RATIO.VBAT_MON_RATIO and host-side math stay consistent.
         let adc_config = AdcConfiguration {
             vbus_ratio: config.power.vbus_ratio.into(),
-            vbat_mon_ratio: 0, // Default to 12.5x ratio (could be read from RATIO register if needed)
+            vbat_mon_ratio: self.adc_config.vbat_mon_ratio,
             ibus_ratio: config.current_limits.ibus_ratio.into(),
             ibat_ratio: config.current_limits.ibat_ratio.into(),
             rs1_mohm: config.current_limits.rs1_mohm,
