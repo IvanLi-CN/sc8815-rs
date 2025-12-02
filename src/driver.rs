@@ -267,6 +267,181 @@ where
         ))
     }
 
+    /// Compute VBAT_SET register value and VBAT monitor ratio from battery configuration.
+    ///
+    /// This helper performs validation and produces the raw register byte plus the
+    /// VBAT_MON_RATIO bit (0: 12.5x, 1: 5x) without doing any I2C access.
+    fn compute_vbat_settings(
+        cell_count: u8,
+        voltage_per_cell: crate::VoltagePerCell,
+        use_internal: bool,
+        ir_comp_mohm: u8,
+    ) -> Result<(u8, u8), Error<I2C::Error>> {
+        if cell_count == 0 || cell_count > 4 {
+            return Err(Error::InvalidParameter);
+        }
+
+        let ir_comp_setting = match ir_comp_mohm {
+            0 => 0b00,
+            20 => 0b01,
+            40 => 0b10,
+            80 => 0b11,
+            _ => return Err(Error::InvalidParameter),
+        };
+
+        let vcell_setting = match voltage_per_cell {
+            crate::VoltagePerCell::Mv4100 => 0b000,
+            crate::VoltagePerCell::Mv4200 => 0b001,
+            crate::VoltagePerCell::Mv4250 => 0b010,
+            crate::VoltagePerCell::Mv4300 => 0b011,
+            crate::VoltagePerCell::Mv4350 => 0b100,
+            crate::VoltagePerCell::Mv4400 => 0b101,
+            crate::VoltagePerCell::Mv4450 => 0b110,
+        };
+
+        let csel_setting = match cell_count {
+            1 => 0b00,
+            2 => 0b01,
+            3 => 0b10,
+            4 => 0b11,
+            _ => return Err(Error::InvalidParameter),
+        };
+
+        let mut vbat_set = 0u8;
+        vbat_set |= vcell_setting; // bits 2-0
+        vbat_set |= csel_setting << 3; // bits 4-3
+        if !use_internal {
+            vbat_set |= 0x20; // VBAT_SEL bit 5
+        }
+        vbat_set |= ir_comp_setting << 6; // bits 7-6
+
+        // Decide VBAT_MON_RATIO according to datasheet guidance
+        let vbat_mon_ratio = if use_internal {
+            let total_voltage_mv = cell_count as u16
+                * match voltage_per_cell {
+                    crate::VoltagePerCell::Mv4100 => 4100,
+                    crate::VoltagePerCell::Mv4200 => 4200,
+                    crate::VoltagePerCell::Mv4250 => 4250,
+                    crate::VoltagePerCell::Mv4300 => 4300,
+                    crate::VoltagePerCell::Mv4350 => 4350,
+                    crate::VoltagePerCell::Mv4400 => 4400,
+                    crate::VoltagePerCell::Mv4450 => 4450,
+                };
+            if total_voltage_mv > 10_240 {
+                0 // 12.5x
+            } else {
+                1 // 5x
+            }
+        } else {
+            // External setting: default to 12.5x; caller may override later.
+            0
+        };
+
+        Ok((vbat_set, vbat_mon_ratio))
+    }
+
+    /// Compute IBUS current-limit register code from effective settings.
+    ///
+    /// This implements the datasheet formula and shared validation used by
+    /// both `set_ibus_limit` and `configure_device`.
+    fn compute_ibus_lim_code(
+        limit_ma: u16,
+        ratio: u8,
+        rs1_mohm: u16,
+    ) -> Result<u8, Error<I2C::Error>> {
+        if limit_ma < 300 || ratio == 0 || ratio > 2 || rs1_mohm == 0 {
+            return Err(Error::InvalidParameter);
+        }
+
+        // IBUS_LIM (A) = (IBUS_LIM_SET + 1) / 256 * IBUS_RATIO * 10mΩ / RS1
+        let ratio_multiplier = match ratio {
+            1 => 6,
+            2 => 3,
+            _ => return Err(Error::InvalidParameter),
+        };
+
+        let num = (limit_ma as u32) * 256u32 * (rs1_mohm as u32);
+        let den = 1000u32 * (ratio_multiplier as u32) * 10u32;
+        let y = num / den; // floor
+        if y == 0 || y > 256 {
+            return Err(Error::InvalidParameter);
+        }
+
+        Ok((y - 1) as u8)
+    }
+
+    /// Compute IBAT current-limit register code from effective settings.
+    fn compute_ibat_lim_code(
+        limit_ma: u16,
+        ratio: u8,
+        rs2_mohm: u16,
+    ) -> Result<u8, Error<I2C::Error>> {
+        if limit_ma < 300 || ratio > 1 || rs2_mohm == 0 {
+            return Err(Error::InvalidParameter);
+        }
+
+        // IBAT_LIM (A) = (IBAT_LIM_SET + 1) / 256 * IBAT_RATIO * 10mΩ / RS2
+        let ratio_multiplier = match ratio {
+            0 => 6,
+            1 => 12,
+            _ => return Err(Error::InvalidParameter),
+        };
+
+        let num = (limit_ma as u32) * 256u32 * (rs2_mohm as u32);
+        let den = 1000u32 * (ratio_multiplier as u32) * 10u32;
+        let y = num / den; // floor
+        if y == 0 || y > 256 {
+            return Err(Error::InvalidParameter);
+        }
+
+        Ok((y - 1) as u8)
+    }
+
+    /// Compute VINREG_SET register code from target voltage and ratio.
+    fn compute_vinreg_set(voltage_mv: u16, ratio: u8) -> Result<u8, Error<I2C::Error>> {
+        if ratio > 1 {
+            return Err(Error::InvalidParameter);
+        }
+
+        // VINREG = (VINREG_SET + 1) * VINREG_RATIO (mV)
+        let ratio_multiplier = match ratio {
+            0 => 100,
+            1 => 40,
+            _ => return Err(Error::InvalidParameter),
+        };
+
+        if voltage_mv < ratio_multiplier || voltage_mv > (255 + 1) * ratio_multiplier {
+            return Err(Error::InvalidParameter);
+        }
+
+        let vinreg_set = (voltage_mv / ratio_multiplier) - 1;
+        if vinreg_set > 255 {
+            return Err(Error::InvalidParameter);
+        }
+
+        Ok(vinreg_set as u8)
+    }
+
+    /// Validate switching-frequency setting (FREQ_SET field).
+    #[inline]
+    fn validate_freq_setting(freq_setting: u8) -> Result<(), Error<I2C::Error>> {
+        if freq_setting > 3 || freq_setting == 2 {
+            Err(Error::InvalidParameter)
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Validate dead-time setting (DT_SET field).
+    #[inline]
+    fn validate_dead_time_setting(dt_setting: u8) -> Result<(), Error<I2C::Error>> {
+        if dt_setting > 3 {
+            Err(Error::InvalidParameter)
+        } else {
+            Ok(())
+        }
+    }
+
     /// Write a single register to the SC8815.
     ///
     /// # Arguments
@@ -467,9 +642,7 @@ where
         &mut self,
         freq_setting: u8,
     ) -> Result<(), Error<I2C::Error>> {
-        if freq_setting > 3 || freq_setting == 2 {
-            return Err(Error::InvalidParameter);
-        }
+        Self::validate_freq_setting(freq_setting)?;
 
         let mut ctrl0 = self.read_register(Register::Ctrl0Set).await?;
         // Clear frequency bits (bits 3-2) and set new value
@@ -487,9 +660,7 @@ where
     ///
     /// Returns `Ok(())` on success, or an `Error` if the operation fails.
     pub async fn set_dead_time(&mut self, dt_setting: u8) -> Result<(), Error<I2C::Error>> {
-        if dt_setting > 3 {
-            return Err(Error::InvalidParameter);
-        }
+        Self::validate_dead_time_setting(dt_setting)?;
 
         let mut ctrl0 = self.read_register(Register::Ctrl0Set).await?;
         // Clear dead time bits (bits 1-0) and set new value
@@ -750,26 +921,7 @@ where
         ratio: u8,
         rs1_mohm: u16,
     ) -> Result<(), Error<I2C::Error>> {
-        if limit_ma < 300 || ratio == 0 || ratio > 2 || rs1_mohm == 0 {
-            return Err(Error::InvalidParameter);
-        }
-
-        // Calculate IBUS_LIM_SET value based on formula:
-        // IBUS_LIM (A) = (IBUS_LIM_SET + 1) / 256 * IBUS_RATIO * 10mΩ / RS1
-        let ratio_multiplier = match ratio {
-            1 => 6,
-            2 => 3,
-            _ => return Err(Error::InvalidParameter),
-        };
-
-        // y = floor((limit_ma * 256 * RS) / (1000 * RATIO * 10))
-        let num = (limit_ma as u32) * 256u32 * (rs1_mohm as u32);
-        let den = 1000u32 * (ratio_multiplier as u32) * 10u32;
-        let y = num / den; // floor
-        if y == 0 || y > 256 {
-            return Err(Error::InvalidParameter);
-        }
-        let ibus_lim_set = (y - 1) as u8;
+        let ibus_lim_set = Self::compute_ibus_lim_code(limit_ma, ratio, rs1_mohm)?;
 
         // Set the IBUS limit register
         self.write_register(Register::IbusLimSet, ibus_lim_set)
@@ -804,25 +956,7 @@ where
         ratio: u8,
         rs2_mohm: u16,
     ) -> Result<(), Error<I2C::Error>> {
-        if limit_ma < 300 || ratio > 1 || rs2_mohm == 0 {
-            return Err(Error::InvalidParameter);
-        }
-
-        // Calculate IBAT_LIM_SET value based on formula:
-        // IBAT_LIM (A) = (IBAT_LIM_SET + 1) / 256 * IBAT_RATIO * 10mΩ / RS2
-        let ratio_multiplier = match ratio {
-            0 => 6,
-            1 => 12,
-            _ => return Err(Error::InvalidParameter),
-        };
-
-        let num = (limit_ma as u32) * 256u32 * (rs2_mohm as u32);
-        let den = 1000u32 * (ratio_multiplier as u32) * 10u32;
-        let y = num / den; // floor
-        if y == 0 || y > 256 {
-            return Err(Error::InvalidParameter);
-        }
-        let ibat_lim_set = (y - 1) as u8;
+        let ibat_lim_set = Self::compute_ibat_lim_code(limit_ma, ratio, rs2_mohm)?;
 
         // Set the IBAT limit register
         self.write_register(Register::IbatLimSet, ibat_lim_set)
@@ -859,30 +993,10 @@ where
         voltage_mv: u16,
         ratio: u8,
     ) -> Result<(), Error<I2C::Error>> {
-        if ratio > 1 {
-            return Err(Error::InvalidParameter);
-        }
-
-        // Calculate VINREG_SET value based on formula:
-        // VINREG = (VINREG_SET + 1) * VINREG_RATIO (mV)
-        let ratio_multiplier = match ratio {
-            0 => 100,
-            1 => 40,
-            _ => return Err(Error::InvalidParameter),
-        };
-
-        if voltage_mv < ratio_multiplier || voltage_mv > (255 + 1) * ratio_multiplier {
-            return Err(Error::InvalidParameter);
-        }
-
-        let vinreg_set = (voltage_mv / ratio_multiplier) - 1;
-        if vinreg_set > 255 {
-            return Err(Error::InvalidParameter);
-        }
+        let vinreg_set = Self::compute_vinreg_set(voltage_mv, ratio)?;
 
         // Set the VINREG register
-        self.write_register(Register::VinregSet, vinreg_set as u8)
-            .await?;
+        self.write_register(Register::VinregSet, vinreg_set).await?;
 
         // Set the ratio in the CTRL0 register
         let mut ctrl0 = self.read_register(Register::Ctrl0Set).await?;
@@ -1430,65 +1544,10 @@ where
         use_internal: bool,
         ir_comp_mohm: u8,
     ) -> Result<(), Error<I2C::Error>> {
-        if cell_count == 0 || cell_count > 4 {
-            return Err(Error::InvalidParameter);
-        }
-
-        let ir_comp_setting = match ir_comp_mohm {
-            0 => 0b00,
-            20 => 0b01,
-            40 => 0b10,
-            80 => 0b11,
-            _ => return Err(Error::InvalidParameter),
-        };
-
-        let vcell_setting = match voltage_per_cell {
-            crate::VoltagePerCell::Mv4100 => 0b000,
-            crate::VoltagePerCell::Mv4200 => 0b001,
-            crate::VoltagePerCell::Mv4250 => 0b010,
-            crate::VoltagePerCell::Mv4300 => 0b011,
-            crate::VoltagePerCell::Mv4350 => 0b100,
-            crate::VoltagePerCell::Mv4400 => 0b101,
-            crate::VoltagePerCell::Mv4450 => 0b110,
-        };
-
-        let csel_setting = match cell_count {
-            1 => 0b00,
-            2 => 0b01,
-            3 => 0b10,
-            4 => 0b11,
-            _ => return Err(Error::InvalidParameter),
-        };
-
-        let mut vbat_set = 0u8;
-        vbat_set |= vcell_setting; // bits 2-0
-        vbat_set |= csel_setting << 3; // bits 4-3
-        if !use_internal {
-            vbat_set |= 0x20; // bit 5: VBAT_SEL
-        }
-        vbat_set |= ir_comp_setting << 6; // bits 7-6
+        let (vbat_set, vbat_mon_ratio) =
+            Self::compute_vbat_settings(cell_count, voltage_per_cell, use_internal, ir_comp_mohm)?;
 
         self.write_register(Register::VbatSet, vbat_set).await?;
-
-        // Set VBAT monitor ratio based on voltage setting mode
-        let vbat_mon_ratio = if use_internal {
-            // Internal mode: use cell_count and voltage_per_cell to determine ratio
-            let total_voltage_mv = cell_count as u16
-                * match voltage_per_cell {
-                    crate::VoltagePerCell::Mv4100 => 4100,
-                    crate::VoltagePerCell::Mv4200 => 4200,
-                    crate::VoltagePerCell::Mv4250 => 4250,
-                    crate::VoltagePerCell::Mv4300 => 4300,
-                    crate::VoltagePerCell::Mv4350 => 4350,
-                    crate::VoltagePerCell::Mv4400 => 4400,
-                    crate::VoltagePerCell::Mv4450 => 4450,
-                };
-            if total_voltage_mv > 10240 { 0 } else { 1 } // 0: 12.5x, 1: 5x
-        } else {
-            // External mode: default to 12.5x ratio for most battery applications
-            // This can be overridden later if needed via set_vbat_monitor_ratio()
-            0 // 12.5x ratio
-        };
 
         // Set VBAT monitor ratio in RATIO register
         let mut ratio_reg = self.read_register(Register::Ratio).await?;
@@ -1716,86 +1775,203 @@ where
         &mut self,
         config: &DeviceConfiguration,
     ) -> Result<(), Error<I2C::Error>> {
-        // First, set the FACTORY bit in CTRL2_SET register as required by the datasheet
-        // This must be done at the beginning of the I2C sequence after power up
-        let ctrl2_current = self.read_register(Register::Ctrl2Set).await?;
-        let mut ctrl2_flags = Ctrl2Flags::from_bits_truncate(ctrl2_current);
-        ctrl2_flags.insert(Ctrl2Flags::FACTORY);
-        self.write_register(Register::Ctrl2Set, ctrl2_flags.bits())
-            .await?;
+        //
+        // NOTE:
+        // - We compute all target field values from `config`.
+        // - Then we perform a single burst read of the contiguous register block
+        //   [0x00..=0x0C] into a local buffer.
+        // - We patch only the required bytes in that buffer, preserving reserved bits.
+        // - Finally we perform a single burst write back starting at 0x00.
+        //
+        // This guarantees:
+        //   * All dependent fields are consistent.
+        //   * Each hardware register in the block is written at most once.
+        //   * `configure_device` issues exactly one I2C read and one I2C write.
+        //
 
-        // Configure battery settings
-        self.configure_battery_voltage(
-            config.battery.cell_count.into(),
+        // ----- Battery configuration (VBAT_SET + VBAT monitor ratio) -----
+        let cell_count: u8 = config.battery.cell_count.into();
+        let ir_comp_mohm: u8 = config.battery.ir_compensation_mohm.into();
+        let (vbat_set, vbat_mon_ratio) = Self::compute_vbat_settings(
+            cell_count,
             config.battery.voltage_per_cell,
             config.battery.use_internal_setting,
-            config.battery.ir_compensation_mohm.into(),
-        )
-        .await?;
+            ir_comp_mohm,
+        )?;
 
-        // Configure current limits
-        self.set_ibus_limit(
+        // ----- Current limit configuration (IBUS/IBAT + RATIO fields) -----
+        let ibus_ratio_u8: u8 = config.current_limits.ibus_ratio.into();
+        let ibat_ratio_u8: u8 = config.current_limits.ibat_ratio.into();
+        let rs1_mohm = config.current_limits.rs1_mohm;
+        let rs2_mohm = config.current_limits.rs2_mohm;
+        let ibus_lim_set = Self::compute_ibus_lim_code(
             config.current_limits.ibus_limit_ma,
-            config.current_limits.ibus_ratio.into(),
-            config.current_limits.rs1_mohm,
-        )
-        .await?;
-
-        self.set_ibat_limit(
+            ibus_ratio_u8,
+            rs1_mohm,
+        )?;
+        let ibat_lim_set = Self::compute_ibat_lim_code(
             config.current_limits.ibat_limit_ma,
-            config.current_limits.ibat_ratio.into(),
-            config.current_limits.rs2_mohm,
-        )
-        .await?;
+            ibat_ratio_u8,
+            rs2_mohm,
+        )?;
 
-        // Configure power management
-        self.set_otg_mode(config.power.operating_mode == OperatingMode::OTG)
-            .await?;
-        self.set_switching_frequency(config.power.switching_frequency.into())
-            .await?;
-        self.set_dead_time(config.power.dead_time.into()).await?;
-        self.set_frequency_dithering(config.power.frequency_dithering)
-            .await?;
-        self.set_pfm_mode(config.power.pfm_mode).await?;
-        // VINREG is only relevant in Charging mode; skip in OTG to honor project policy
-        if config.power.operating_mode == OperatingMode::Charging {
-            self.set_vinreg_voltage(
-                config.power.vinreg_voltage_mv,
-                config.power.vinreg_ratio.into(),
-            )
-            .await?;
-        }
-
-        // Apply VBUS ratio (ADC/internal scaling) according to configuration,
-        // but preserve any VBAT/IBUS/IBAT ratio bits configured by
-        // `configure_battery_voltage` so ADC math and hardware stay aligned.
-        let mut ratio_reg = self.read_register(Register::Ratio).await?;
+        // ----- Power configuration (CTRL0/2/3, VINREG, RATIO) -----
         let vbus_ratio_u8: u8 = config.power.vbus_ratio.into();
-        if vbus_ratio_u8 == 1 {
-            ratio_reg |= RatioFlags::VBUS_RATIO.bits();
-        } else {
-            ratio_reg &= !RatioFlags::VBUS_RATIO.bits();
+        if vbus_ratio_u8 > 1 {
+            return Err(Error::InvalidParameter);
         }
-        self.write_register(Register::Ratio, ratio_reg).await?;
 
-        // Configure charging settings
-        self.set_trickle_charging(config.trickle_charging).await?;
-        self.set_charging_termination(config.charging_termination)
-            .await?;
-        self.set_charging_current_selection(!config.use_ibus_for_charging)
-            .await?;
+        // Optional VINREG programming only in charging mode
+        let mut vinreg_set: Option<u8> = None;
+        let mut use_vinreg_ratio_40x = false;
+        if config.power.operating_mode == OperatingMode::Charging {
+            let vinreg_ratio_u8: u8 = config.power.vinreg_ratio.into();
+            let vinreg_code =
+                Self::compute_vinreg_set(config.power.vinreg_voltage_mv, vinreg_ratio_u8)?;
+            vinreg_set = Some(vinreg_code);
+            use_vinreg_ratio_40x = vinreg_ratio_u8 == 1;
+        }
 
-        // Update ADC configuration in the driver to match the device configuration.
-        // Use the VBAT monitor ratio already chosen by `configure_battery_voltage`
-        // (and stored in self.adc_config) instead of forcing 12.5x here, so that
-        // hardware RATIO.VBAT_MON_RATIO and host-side math stay consistent.
+        // Validate switching frequency and dead time settings up front
+        let freq_setting: u8 = config.power.switching_frequency.into();
+        Self::validate_freq_setting(freq_setting)?;
+        let dt_setting: u8 = config.power.dead_time.into();
+        Self::validate_dead_time_setting(dt_setting)?;
+
+        // ----- Single-register write for VBAT_SET (0x00) -----
+        // All bits in VBAT_SET are owned by the battery configuration fields, so we
+        // can safely write the computed value directly without needing an RMW cycle.
+        self.write_register(Register::VbatSet, vbat_set).await?;
+
+        // ----- Burst read current register images for 0x05..=0x0C -----
+        // Layout (per SC8815 register map), starting at 0x05:
+        //  0: IBUS_LIM_SET      (0x05, R/W)
+        //  1: IBAT_LIM_SET      (0x06, R/W)
+        //  2: VINREG_SET        (0x07, R/W)
+        //  3: RATIO             (0x08, R/W)
+        //  4: CTRL0_SET         (0x09, R/W)
+        //  5: CTRL1_SET         (0x0A, R/W)
+        //  6: CTRL2_SET         (0x0B, R/W)
+        //  7: CTRL3_SET         (0x0C, R/W)
+        let mut regs = [0u8; 8];
+        self.i2c
+            .write_read(self.address, &[Register::IbusLimSet.addr()], &mut regs)
+            .await
+            .map_err(Error::I2c)?;
+
+        // CTRL2_SET: FACTORY bit and EN_DITHER
+        let mut ctrl2_flags = Ctrl2Flags::from_bits_truncate(regs[6]);
+        ctrl2_flags.insert(Ctrl2Flags::FACTORY);
+        if config.power.frequency_dithering {
+            ctrl2_flags.insert(Ctrl2Flags::EN_DITHER);
+        } else {
+            ctrl2_flags.remove(Ctrl2Flags::EN_DITHER);
+        }
+        regs[6] = ctrl2_flags.bits();
+
+        // Current limits: IBUS_LIM_SET / IBAT_LIM_SET
+        regs[0] = ibus_lim_set;
+        regs[1] = ibat_lim_set;
+
+        // VINREG_SET: only update if we configured VINREG (charging mode); otherwise
+        // leave as-is to avoid surprising changes when in OTG-only configurations.
+        if let Some(code) = vinreg_set {
+            regs[2] = code;
+        }
+
+        // CTRL0_SET: EN_OTG, VINREG_RATIO, FREQ_SET, DT_SET
+        let mut ctrl0_flags = Ctrl0Flags::from_bits_truncate(regs[4]);
+        if config.power.operating_mode == OperatingMode::OTG {
+            ctrl0_flags.insert(Ctrl0Flags::EN_OTG);
+        } else {
+            ctrl0_flags.remove(Ctrl0Flags::EN_OTG);
+        }
+        let mut ctrl0_val = ctrl0_flags.bits();
+        // FREQ_SET bits[3:2]
+        ctrl0_val = (ctrl0_val & !0x0C) | ((freq_setting & 0x03) << 2);
+        // DT_SET bits[1:0]
+        ctrl0_val = (ctrl0_val & !0x03) | (dt_setting & 0x03);
+        // VINREG_RATIO bit4 (only if we configured VINREG)
+        if vinreg_set.is_some() {
+            if use_vinreg_ratio_40x {
+                ctrl0_val |= Ctrl0Flags::VINREG_RATIO.bits();
+            } else {
+                ctrl0_val &= !Ctrl0Flags::VINREG_RATIO.bits();
+            }
+        }
+        regs[4] = ctrl0_val;
+
+        // CTRL1_SET: DIS_TRICKLE, DIS_TERM, ICHAR_SEL
+        let mut ctrl1_flags = Ctrl1Flags::from_bits_truncate(regs[5]);
+        // Trickle charge control
+        if config.trickle_charging {
+            ctrl1_flags.remove(Ctrl1Flags::DIS_TRICKLE);
+        } else {
+            ctrl1_flags.insert(Ctrl1Flags::DIS_TRICKLE);
+        }
+        // Charging termination control
+        if config.charging_termination {
+            ctrl1_flags.remove(Ctrl1Flags::DIS_TERM);
+        } else {
+            ctrl1_flags.insert(Ctrl1Flags::DIS_TERM);
+        }
+        // Charging current selection (IBUS vs IBAT)
+        if config.use_ibus_for_charging {
+            ctrl1_flags.remove(Ctrl1Flags::ICHAR_SEL);
+        } else {
+            ctrl1_flags.insert(Ctrl1Flags::ICHAR_SEL);
+        }
+        regs[5] = ctrl1_flags.bits();
+
+        // CTRL3_SET: PFM mode only (preserve all other bits)
+        let mut ctrl3_flags = Ctrl3Flags::from_bits_truncate(regs[7]);
+        if config.power.pfm_mode {
+            ctrl3_flags.insert(Ctrl3Flags::EN_PFM);
+        } else {
+            ctrl3_flags.remove(Ctrl3Flags::EN_PFM);
+        }
+        regs[7] = ctrl3_flags.bits();
+
+        // RATIO register: VBUS_RATIO, VBAT_MON_RATIO, IBUS_RATIO, IBAT_RATIO
+        let mut ratio_val = regs[3];
+        if vbat_mon_ratio == 1 {
+            ratio_val |= RatioFlags::VBAT_MON_RATIO.bits();
+        } else {
+            ratio_val &= !RatioFlags::VBAT_MON_RATIO.bits();
+        }
+        if vbus_ratio_u8 == 1 {
+            ratio_val |= RatioFlags::VBUS_RATIO.bits();
+        } else {
+            ratio_val &= !RatioFlags::VBUS_RATIO.bits();
+        }
+        // IBUS_RATIO bits[3:2]
+        ratio_val =
+            (ratio_val & !RatioFlags::IBUS_RATIO_MASK.bits()) | ((ibus_ratio_u8 & 0x03) << 2);
+        // IBAT_RATIO bit4
+        if ibat_ratio_u8 == 1 {
+            ratio_val |= RatioFlags::IBAT_RATIO.bits();
+        } else {
+            ratio_val &= !RatioFlags::IBAT_RATIO.bits();
+        }
+        regs[3] = ratio_val;
+
+        // ----- Burst write back 0x05..=0x0C -----
+        let mut buf = [0u8; 1 + 8];
+        buf[0] = Register::IbusLimSet.addr();
+        buf[1..].copy_from_slice(&regs);
+        self.i2c
+            .write(self.address, &buf)
+            .await
+            .map_err(Error::I2c)?;
+
+        // ----- Update driver-side ADC configuration -----
         let adc_config = AdcConfiguration {
-            vbus_ratio: config.power.vbus_ratio.into(),
-            vbat_mon_ratio: self.adc_config.vbat_mon_ratio,
-            ibus_ratio: config.current_limits.ibus_ratio.into(),
-            ibat_ratio: config.current_limits.ibat_ratio.into(),
-            rs1_mohm: config.current_limits.rs1_mohm,
-            rs2_mohm: config.current_limits.rs2_mohm,
+            vbus_ratio: vbus_ratio_u8,
+            vbat_mon_ratio,
+            ibus_ratio: ibus_ratio_u8,
+            ibat_ratio: ibat_ratio_u8,
+            rs1_mohm,
+            rs2_mohm,
         };
         self.update_adc_config(adc_config);
 
